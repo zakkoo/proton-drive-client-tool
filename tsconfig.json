@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@protontech/crypto": ["types/generated/protontech-crypto/index.d.ts"],
+      "@protontech/crypto/srp": ["types/generated/protontech-crypto/srp/index.d.ts"],
+      "@protontech/crypto/utils": ["types/generated/protontech-crypto/utils.d.ts"],
+      "@protontech/crypto/constants": ["types/generated/protontech-crypto/constants.d.ts"],
+      "@protontech/crypto/*": ["types/generated/protontech-crypto/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "types/**/*.d.ts"]
+}

@@ -5,7 +5,7 @@
  * Implements the SDK's ProtonDriveAccount interface directly.
  */
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
-import type { PrivateKeyReference, PublicKeyReference } from '@protontech/crypto';
+import { VERIFICATION_STATUS, type PrivateKeyReference, type PublicKeyReference } from '@protontech/crypto';
 
 import type { AccountApi} from './accountApi.js';
 import { AddressNotFoundError, type Address, type AddressKey } from './accountApi.js';
@@ -25,8 +25,12 @@ export interface KeyCrypto {
   }): Promise<{ data: string; verificationStatus: number }>;
 }
 
-/** VERIFICATION_STATUS.SIGNED_AND_VALID in @protontech/crypto. */
-export const SIGNED_AND_VALID = 2;
+/**
+ * VERIFICATION_STATUS.SIGNED_AND_VALID in @protontech/crypto (NOT_SIGNED = 0,
+ * SIGNED_AND_VALID = 1, SIGNED_AND_INVALID = 2). Was wrongly 2, which made every
+ * address key token fail verification against the live API.
+ */
+export const SIGNED_AND_VALID: number = VERIFICATION_STATUS.SIGNED_AND_VALID;
 
 interface UserData {
   userPrivateKeys: PrivateKeyReference[];
@@ -83,10 +87,14 @@ export class Addresses implements ProtonDriveAccount {
         const pair = await this.getAddressKey(data, key, address.Email);
         keys.push({ id: pair.id, key: pair.privateKey });
       } catch (error) {
+        this.logger.error(`Could not load address key ${key.ID} for ${address.Email}`, error);
         errors.push(error);
       }
     }
-    if (keys.length === 0) throw new Error(`No usable private key for address ${address.Email}`, { cause: errors });
+    if (keys.length === 0) {
+      const reasons = errors.map((e) => (e instanceof Error ? e.message : String(e))).join('; ');
+      throw new Error(`No usable private key for address ${address.Email}: ${reasons}`, { cause: errors });
+    }
     return { email: address.Email, addressId: address.ID, primaryKeyIndex: 0, keys };
   }
 

@@ -24,7 +24,15 @@ import { Credentials } from './sessionCredentials.js';
 import { SessionState } from './sessionState.js';
 import { Srp } from './srpModule.js';
 
-export const APP_VERSION = 'proton-drive-sync@0.1.0';
+/**
+ * Sent as `x-pm-appversion`. Proton validates `<platform>-<product>@<version>` and the
+ * browser-login fork is only approvable when the platform matches the auth client id
+ * (`external-drive`). Mirrors the official CLI's third-party default
+ * (`external-drive-sdkclijs@<version>`, see ProtonDriveApps/sdk cli/scripts/build-cli.mjs).
+ * Verified live 2026-09-08: `proton-*` and `linux-drive@*` are rejected outright and
+ * `web-drive@5.2.0.0` creates a fork the browser approval never attaches to.
+ */
+export const APP_VERSION = 'external-drive-sdkclijs@0.1.0';
 const CLIENT_UID_PREFIX = 'proton-drive-sync';
 const DEFAULT_BASE_URL = 'drive-api.proton.me';
 

@@ -6,7 +6,6 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { history } from '../audit/history.js';
-import { saveConfigFile } from '../config/configFile.js';
 import { ConfigError } from '../config/schema.js';
 import { runSetup } from '../config/setup.js';
 import { ControlClient, ControlServer } from '../engine/control.js';
@@ -137,8 +136,12 @@ export async function setup(deps: CommandDeps, args: string[], json: boolean): P
 export async function run(deps: CommandDeps, flags: { dryRun: boolean; paused: boolean; tray: boolean }, json: boolean): Promise<number> {
   const { ctx } = deps;
   if (ctx.config === null) throw new CliError('not configured; run `proton-drive-sync setup <local-dir> <remote-folder>` first');
+  // Command-line flags apply to this invocation only. Persisting them silently turned every
+  // later `run` into a dry run, with no flag to undo it; the config file is the persistent switch.
   const config = { ...ctx.config, dryRun: ctx.config.dryRun || flags.dryRun, startPaused: ctx.config.startPaused || flags.paused };
-  if (flags.dryRun || flags.paused) saveConfigFile(ctx.paths.configFile, config);
+  if (ctx.config.dryRun && !flags.dryRun && !json) {
+    deps.stderr(`Dry-run mode is enabled in ${ctx.paths.configFile} ("dryRun": true); no changes will be made until you set it to false.`);
+  }
   if (await ControlClient.probe(ctx.paths.controlSocket)) throw new CliError('another instance is already running (control socket answered)');
 
   let throttle: (state: 'throttled' | 'unthrottled') => void = () => undefined;

@@ -175,7 +175,7 @@ describe('CLI', () => {
     expect(await cli('recycle', 'purge')).toBe(0);
     expect(stdout.at(-1)).toBe('Nothing to purge.');
 
-    // Flags are persisted into the configuration when given to `run`.
+    // Flags apply to this invocation only and are not persisted into the configuration.
     const flagDeps = makeDeps();
     const stop2 = stopRun;
     const running2 = dispatch(flagDeps, parseCli(['run', '--dry-run', '--paused', '--no-tray']));
@@ -185,8 +185,8 @@ describe('CLI', () => {
       if ((await cli('status', '--json')) === 0) break;
     }
     const cfg = loadConfigFile(flagDeps.ctx.paths.configFile);
-    expect(cfg?.dryRun).toBe(true);
-    expect(cfg?.startPaused).toBe(true);
+    expect(cfg?.dryRun).toBe(false);
+    expect(cfg?.startPaused).toBe(false);
     stdout = [];
     expect(await cli('status', '--json')).toBe(0);
     const s = JSON.parse(stdout.at(-1) ?? '{}') as { state: string; dryRun: boolean };

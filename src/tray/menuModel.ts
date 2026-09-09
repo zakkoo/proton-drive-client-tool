@@ -130,6 +130,59 @@ export function buildTrayModel(status: EngineStatus, conflicts: ConflictEntry[],
   };
 }
 
+/** The engine-control surface a menu action drives; ControlTarget satisfies it structurally. */
+export interface MenuControlTarget {
+  pause(): void;
+  resume(): void;
+  syncNow(): Promise<unknown>;
+  confirmHeldPlan(id: string): Promise<unknown>;
+  rejectHeldPlan(id: string): unknown;
+  resolveConflict(id: number, choice: 'keep_local' | 'keep_remote' | 'keep_both'): Promise<unknown>;
+  releaseQuarantine(id: number): void;
+  quit(): Promise<unknown>;
+}
+
+/**
+ * Apply a menu action that changes engine state. Returns true when it handled
+ * the action; `open_*` actions (which need host paths, not the engine) return
+ * false so the caller opens them. Extracted from the tray so the same
+ * label-to-engine wiring can be unit-tested without a D-Bus host.
+ */
+export async function dispatchMenuAction(action: MenuAction, target: MenuControlTarget): Promise<boolean> {
+  switch (action.type) {
+    case 'pause':
+      target.pause();
+      return true;
+    case 'resume':
+      target.resume();
+      return true;
+    case 'sync_now':
+      await target.syncNow();
+      return true;
+    case 'confirm_held':
+      await target.confirmHeldPlan(action.id);
+      return true;
+    case 'reject_held':
+      target.rejectHeldPlan(action.id);
+      return true;
+    case 'resolve_conflict':
+      await target.resolveConflict(action.id, action.choice);
+      return true;
+    case 'release_quarantine':
+      target.releaseQuarantine(action.id);
+      return true;
+    case 'quit':
+      await target.quit();
+      return true;
+    case 'open_folder':
+    case 'open_recycle':
+    case 'open_log':
+    case 'open_details':
+    case 'open_settings':
+      return false; // need host paths, handled by the caller
+  }
+}
+
 /** Flatten a menu tree into id -> item for event dispatch. */
 export function indexMenu(items: MenuItem[], into = new Map<number, MenuItem>()): Map<number, MenuItem> {
   for (const i of items) {

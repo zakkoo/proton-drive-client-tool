@@ -5,6 +5,13 @@ import path from 'node:path';
 export interface RootIdentity {
   dev: number;
   ino: number;
+  /**
+   * Directory creation time. Optional for backward compatibility with configs
+   * written before this field existed. It distinguishes a replaced directory
+   * that reused the same inode (which happens on some filesystems, e.g. CI
+   * runners) from the original — `dev`/`ino` alone cannot.
+   */
+  birthtimeMs?: number;
 }
 
 export interface LocalRootContext {
@@ -71,9 +78,13 @@ export function validateLocalRoot(candidate: string, ctx: LocalRootContext = {})
 /** The file system identity of a directory, used to detect a replaced or remounted root. */
 export function readRootIdentity(root: string): RootIdentity {
   const st = statSync(root);
-  return { dev: st.dev, ino: st.ino };
+  return { dev: st.dev, ino: st.ino, birthtimeMs: st.birthtimeMs };
 }
 
 export function sameIdentity(a: RootIdentity, b: RootIdentity): boolean {
-  return a.dev === b.dev && a.ino === b.ino;
+  if (a.dev !== b.dev || a.ino !== b.ino) return false;
+  // Only compare creation time when both identities carry it (older configs did not); a difference
+  // there means the directory was replaced even if the inode was reused.
+  if (a.birthtimeMs !== undefined && b.birthtimeMs !== undefined) return a.birthtimeMs === b.birthtimeMs;
+  return true;
 }

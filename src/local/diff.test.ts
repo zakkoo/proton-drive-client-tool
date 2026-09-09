@@ -70,19 +70,34 @@ describe('diffSnapshots', () => {
     expect(changes.find((c) => c.type === 'moved' && c.to === 'lib/f3.txt')).toMatchObject({ contentChanged: true });
   });
 
-  it('treats inode reuse with different content as delete plus create, flagged ambiguous', async () => {
+  it('inode reuse with a newer birthtime is a clean delete plus create, not a move', async () => {
     writeFileSync(path.join(root, 'old.txt'), 'old content');
     const prev = await scan();
     const previousDigest = await baselineDigests(prev);
-    const oldIno = prev.entries.get('old.txt')?.ino;
-    // Force inode reuse: remove the old file and create a new one of the same size; on most
-    // file systems the freed inode is handed out again immediately. If it is not, we
-    // patch the snapshot to simulate reuse, which is the case under test.
+    const old = prev.entries.get('old.txt');
+    // Force inode reuse but keep the new file's own (newer) birthtime, as a real reused inode has.
     unlinkSync(path.join(root, 'old.txt'));
     writeFileSync(path.join(root, 'new.txt'), 'new content');
     const next = await scan();
     const n = next.entries.get('new.txt');
-    if (n !== undefined && oldIno !== undefined && n.ino !== oldIno) next.entries.set('new.txt', { ...n, ino: oldIno });
+    if (n !== undefined && old !== undefined) next.entries.set('new.txt', { ...n, ino: old.ino });
+    const changes = await diffSnapshots(prev, next, { previousDigest, digests });
+    expect(changes.map((c) => c.type).sort()).toEqual(['created', 'deleted']);
+    // Birthtime distinguishes the reused inode from a rename, so neither side is ambiguous.
+    expect(changes.some((c) => 'ambiguous' in c && c.ambiguous)).toBe(false);
+  });
+
+  it('when even birthtime cannot distinguish reuse from a move, the delete/create are flagged ambiguous', async () => {
+    writeFileSync(path.join(root, 'old.txt'), 'old content');
+    const prev = await scan();
+    const previousDigest = await baselineDigests(prev);
+    const old = prev.entries.get('old.txt');
+    unlinkSync(path.join(root, 'old.txt'));
+    writeFileSync(path.join(root, 'new.txt'), 'new content');
+    const next = await scan();
+    const n = next.entries.get('new.txt');
+    // Same inode AND same birthtime: the diff cannot prove it is not a move, so it stays cautious.
+    if (n !== undefined && old !== undefined) next.entries.set('new.txt', { ...n, ino: old.ino, birthtimeMs: old.birthtimeMs });
     const changes = await diffSnapshots(prev, next, { previousDigest, digests });
     expect(changes.map((c) => c.type).sort()).toEqual(['created', 'deleted']);
     expect(changes.every((c) => 'ambiguous' in c && c.ambiguous)).toBe(true);

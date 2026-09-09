@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 
 import type { ControlTarget } from '../engine/control.js';
+import { clientScript } from './detailView.js';
 
 export class DetailPageServer {
   private server: Server | null = null;
@@ -157,6 +158,7 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.3rem .5
 </style></head><body>
 <h1>Proton Drive Sync</h1>
 <p><span class="state" id="state"></span> <span class="muted" id="reason"></span></p>
+<p class="muted">Files: <span id="counts"></span> &middot; Last full sync: <span id="lastsync"></span></p>
 <p id="lines" class="muted"></p>
 <p><button onclick="act('pause')">Pause</button><button onclick="act('resume')">Resume</button><button onclick="act('sync')">Sync now</button></p>
 <div id="held"></div>
@@ -165,21 +167,5 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.3rem .5
 <h2>Quarantine</h2><table id="quarantine"></table>
 <h2>Recycle bin</h2><table id="recycle"></table>
 <script>
-const base = location.pathname.replace(/\\/$/, '');
-async function act(name, body) { await fetch(base + '/api/' + name, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); refresh(); }
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function rows(el, header, list, fn) { el.innerHTML = '<tr>' + header.map(h => '<th>' + h + '</th>').join('') + '</tr>' + (list.length ? list.map(fn).join('') : '<tr><td class="muted" colspan="' + header.length + '">none</td></tr>'); }
-async function refresh() {
-  const r = await fetch(base + '/api/state'); const d = await r.json(); const s = d.status;
-  document.getElementById('state').textContent = s.state.replace(/_/g, ' ');
-  document.getElementById('reason').textContent = s.reason || '';
-  document.getElementById('lines').textContent = s.summaryLines.join(' · ');
-  const h = s.attention.heldPlan;
-  document.getElementById('held').innerHTML = h ? '<div class="warn"><b>Confirmation required:</b> ' + esc(h.reason) + '<ul>' + h.affected.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul><button onclick="act(\\'confirm\\', {id:\\'' + esc(h.id) + '\\'})">Proceed</button><button onclick="act(\\'reject\\', {id:\\'' + esc(h.id) + '\\'})">Reject</button></div>' : '';
-  rows(document.getElementById('transfers'), ['Direction', 'Path', 'Progress', 'Speed'], s.transfers, t => { const pct = t.total ? Math.round(t.bytes / t.total * 100) : 0; return '<tr><td>' + (t.kind === 'upload' ? '↑ upload' : '↓ download') + '</td><td>' + esc(t.relPath) + '</td><td><div class="bar"><div style="width:' + pct + '%"></div></div></td><td>' + Math.round(t.speed / 1024) + ' KiB/s</td></tr>'; });
-  rows(document.getElementById('conflicts'), ['Path', 'Kind', 'Local', 'Remote', 'Resolve'], d.conflicts, c => '<tr><td>' + esc(c.relPath) + '</td><td>' + esc(c.kind) + '</td><td><code>' + esc(JSON.stringify(c.local)) + '</code></td><td><code>' + esc(JSON.stringify(c.remote)) + '</code></td><td><button onclick="act(\\'resolve\\', {id:' + c.id + ', choice:\\'keep_local\\'})">Keep local</button><button onclick="act(\\'resolve\\', {id:' + c.id + ', choice:\\'keep_remote\\'})">Keep remote</button><button onclick="act(\\'resolve\\', {id:' + c.id + ', choice:\\'keep_both\\'})">Keep both</button></td></tr>');
-  rows(document.getElementById('quarantine'), ['Path', 'Node', 'Reason', ''], d.quarantine, q => '<tr><td>' + esc(q.relPath || '-') + '</td><td>' + esc(q.nodeUid || '-') + '</td><td>' + esc(q.reason) + '</td><td><button onclick="act(\\'release\\', {id:' + q.id + '})">Release</button></td></tr>');
-  rows(document.getElementById('recycle'), ['Recycled at', 'Path'], d.recycle, i => '<tr><td>' + new Date(i.bucket).toLocaleString() + '</td><td>' + esc(i.relPath) + '</td></tr>');
-}
-refresh(); setInterval(refresh, 2000);
+${clientScript()}
 </script></body></html>`;

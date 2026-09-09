@@ -126,6 +126,10 @@ export function summarize(status: EngineStatus): string[] {
   if (status.attention.conflicts > 0) lines.push(`${String(status.attention.conflicts)} conflict(s) to resolve`);
   if (status.attention.quarantined > 0) lines.push(`${String(status.attention.quarantined)} quarantined item(s)`);
   if (status.attention.heldPlan !== null) lines.push(`Held plan: ${status.attention.heldPlan.reason}`);
+  const c = status.counts;
+  if (c.baseline > 0 || c.localFiles > 0 || c.remoteFiles > 0) {
+    lines.push(`Files: ${String(c.localFiles)} local, ${String(c.remoteFiles)} remote (${String(c.baseline)} synced)`);
+  }
   if (status.lastSuccessfulSyncAt !== null) lines.push(`Last full sync: ${new Date(status.lastSuccessfulSyncAt).toISOString()}`);
   return lines;
 }

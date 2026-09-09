@@ -15,6 +15,7 @@ beforeEach(() => {
   h = EngineHarness.create();
 });
 afterEach(async () => {
+  h.assertNoUserContentLost();
   await h.dispose();
 });
 
@@ -150,6 +151,28 @@ describe('end-to-end scenarios', () => {
     // The original local file was never touched.
     expect(h.localFiles().get('mine.txt')).toBe('M');
     expect(readdirSync(path.join(h.root, '.proton-sync', 'tmp'))).toEqual([]);
+  });
+
+  it('a live edit of the same file on both sides while running becomes a conflict, not an overwrite', async () => {
+    h.write('shared.txt', 'original');
+    await h.start();
+    await h.waitForConvergence();
+
+    // Edit the same file on both sides at once, while the engine is running.
+    h.write('shared.txt', 'local edit');
+    h.fake.seedRevision(h.remotePathToUid('shared.txt') ?? '', 'remote edit');
+    await h.bundle?.engine.syncNow();
+    await h.waitForConvergence(15_000);
+
+    // Neither edit silently overwrote the other: one stays at the path, the other is kept beside it.
+    const local = h.localFiles();
+    const values = [...local.values()];
+    expect(values, 'the local edit must survive').toContain('local edit');
+    expect(values, 'the remote edit must survive').toContain('remote edit');
+    expect([...local.keys()].filter((k) => k.includes('.conflict-')), 'a conflict copy is kept').toHaveLength(1);
+    expect(h.bundle?.controlTarget.listConflicts().map((c) => c.kind)).toEqual(['content']);
+    expect(h.fake.trashedUids()).toEqual([]);
+    sameSides();
   });
 
   it('a nested tree created while running, then partially deleted locally, converges with recycled nothing and trashed exactly the deleted files', async () => {

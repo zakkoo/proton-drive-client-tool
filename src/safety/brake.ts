@@ -40,6 +40,19 @@ export interface HeldPlan {
   plan: Plan;
   verdict: BrakeVerdict;
   heldAt: number;
+  /** Signature of the destructive work this id stands for; a change mints a new id. */
+  signature: string;
+}
+
+/**
+ * A stable fingerprint of exactly what confirming this plan would destroy: the
+ * destructive operations plus any withheld deletes (which confirm also runs).
+ * Independent of per-cycle operation ids, so a re-plan of the same deletes keeps
+ * the same signature — but a grown or different set does not.
+ */
+export function brakeSignature(plan: Plan): string {
+  const items = [...destructiveOperations(plan), ...plan.withheld.map((w) => w.operation)].map(describe).sort();
+  return JSON.stringify(items);
 }
 
 export type GateResult = { status: 'run'; plan: Plan } | { status: 'held'; held: HeldPlan };
@@ -68,10 +81,13 @@ export class PlanGate {
       this.held = null;
       return { status: 'run', plan };
     }
-    // Keep the id stable while a plan stays held across re-evaluations, so a user decision
-    // made against the id they saw still applies to the current plan.
-    const id = this.held?.id ?? `held-${String(++this.seq)}`;
-    const held: HeldPlan = { id, plan, verdict, heldAt: this.held?.heldAt ?? this.now() };
+    // Bind the id to the destructive work it stands for. While that is unchanged the id (and
+    // heldAt) stay stable, so re-confirming the same plan works; but if the plan grows or changes,
+    // a new id is minted so a decision made against the old id can never silently apply extra deletes.
+    const signature = brakeSignature(plan);
+    const previous = this.held !== null && this.held.signature === signature ? this.held : null;
+    const id = previous?.id ?? `held-${String(++this.seq)}`;
+    const held: HeldPlan = { id, plan, verdict, heldAt: previous?.heldAt ?? this.now(), signature };
     this.held = held;
     this.audit.append({
       kind: 'safety',

@@ -47,7 +47,7 @@ export interface SyncConfig {
   /** Recorded at setup: the remote root node identifier. */
   remoteRootNodeUid?: string;
   /** Recorded at setup: the local root's file system identity. */
-  localRootIdentity?: { dev: number; ino: number };
+  localRootIdentity?: { dev: number; ino: number; birthtimeMs?: number };
   /** Glob ignore patterns (picomatch syntax), relative to the sync root. */
   ignore: string[];
   safety: SafetyConfig;
@@ -247,8 +247,8 @@ export function parseConfig(raw: unknown): SyncConfig {
   }
   const identity = merged['localRootIdentity'];
   if (identity !== undefined) {
-    if (!isRecord(identity) || !Number.isInteger(identity['dev']) || !Number.isInteger(identity['ino'])) {
-      problems.push('localRootIdentity must be { dev: integer, ino: integer } when present');
+    if (!isRecord(identity) || !Number.isInteger(identity['dev']) || !Number.isInteger(identity['ino']) || (identity['birthtimeMs'] !== undefined && typeof identity['birthtimeMs'] !== 'number')) {
+      problems.push('localRootIdentity must be { dev: integer, ino: integer, birthtimeMs?: number } when present');
     }
   }
 

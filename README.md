@@ -255,10 +255,19 @@ Your files are untouched by this; only the tool's own state is removed. The next
 
 ## Development
 
+The test suite is split into three vitest projects: `unit` (pure/isolated
+`*.test.ts`), `e2e` (`*.e2e.test.ts` — full engine and CLI against the fake
+remote and a real temp tree), and `fault` (`*.fault.test.ts` — crash injection).
+
 ```bash
-npm run check      # typecheck + lint + unit tests
-npm run test:fault # crash-injection suite
-./scripts/ci.sh    # everything, including the build
+npm run check                    # typecheck + lint + unit tests
+npm run test -- --project e2e    # end-to-end journeys
+npm run test:fault               # crash-injection suite
+./scripts/ci.sh                  # everything, including the build
 ```
+
+**Use Node 24.x** for `./scripts/ci.sh`. GitHub Actions pins Node 24 (see
+`.github/workflows/ci.yml`); running the gate on the same major keeps local
+green and CI green in step (`mise use node@24` or `nvm use 24`).
 
 See `src/ARCHITECTURE.md` for the design, and `openspec/changes/proton-drive-sync/` for the proposal, specs and task list.

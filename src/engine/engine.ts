@@ -16,10 +16,11 @@ import { Executor } from '../execute/executor.js';
 import { recoverJournal } from '../execute/recovery.js';
 import type { ExecutionSummary, ExecutorContext, ExecutorEvent } from '../execute/types.js';
 import type { DigestProvider } from '../local/digest.js';
+import { createIgnoreMatcher, type IgnoreMatcher } from '../local/ignore.js';
 import type { LocalSnapshot } from '../local/snapshot.js';
 import type { LocalWatcher, LocalWatcherEvent } from '../local/watcher.js';
 import { reconcile } from '../reconcile/reconcile.js';
-import type { BaselineItem, Operation, Plan } from '../reconcile/types.js';
+import type { BaselineItem, LocalView, Operation, Plan } from '../reconcile/types.js';
 import type { RemoteChangeFeed } from '../remote/events.js';
 import { RemoteError } from '../remote/interface.js';
 import type { Logger } from '../remote/proton/logger.js';
@@ -76,18 +77,54 @@ export class SyncEngine extends EventEmitter {
   private localRootAvailable = true;
   private readonly transfers = new Map<string, TransferStatus>();
   private lastRemoteFailure: string | null = null;
+  private readonly ignoreMatcher: IgnoreMatcher;
 
   constructor(private readonly deps: EngineDeps) {
     super();
     this.now = deps.now ?? Date.now;
     this.userPaused = deps.config.startPaused;
     this.status = initialStatus(deps.config.dryRun, this.now());
+    this.ignoreMatcher = createIgnoreMatcher(deps.config.ignore);
+  }
+
+  /**
+   * Tag baseline paths that vanished from the scan only because they are now
+   * ignored or unsyncable, so the reconciler does not read their absence as a
+   * deletion.
+   */
+  private withHiddenPaths(view: LocalView, snapshot: LocalSnapshot, baseline: ReadonlyMap<string, BaselineItem>): LocalView {
+    const hidden = new Set<string>();
+    for (const relPath of baseline.keys()) {
+      if (view.items.has(relPath)) continue;
+      if (this.ignoreMatcher(relPath) || snapshot.unsyncable.some((u) => u.relPath === relPath)) hidden.add(relPath);
+    }
+    return hidden.size > 0 ? { ...view, hidden } : view;
   }
 
   // ---- status ------------------------------------------------------------
 
   getStatus(): EngineStatus {
-    return { ...this.status, transfers: [...this.transfers.values()], summaryLines: summarize({ ...this.status, transfers: [...this.transfers.values()] }) };
+    // Recompute counts and attention live so a surface never shows a stale empty default while
+    // the engine already has real values (e.g. counts right after a cycle, before the next publish).
+    const live = { ...this.status, transfers: [...this.transfers.values()], attention: this.computeAttention(), counts: this.computeCounts() };
+    return { ...live, summaryLines: summarize(live) };
+  }
+
+  private computeAttention(): EngineStatus['attention'] {
+    const held = this.deps.gate.current;
+    return {
+      conflicts: this.deps.conflictRepo.open().length,
+      quarantined: this.deps.quarantine.open().length,
+      heldPlan: held === null ? null : { id: held.id, reason: held.verdict.reason ?? 'confirmation required', affected: held.verdict.affected.map(describeOp) },
+    };
+  }
+
+  private computeCounts(): EngineStatus['counts'] {
+    return {
+      baseline: this.deps.baseline.count(),
+      localFiles: this.lastSnapshot === null ? 0 : [...this.lastSnapshot.entries.values()].filter((e) => e.kind === 'file').length,
+      remoteFiles: this.deps.mirror.files(),
+    };
   }
 
   private setState(state: EngineState, reason: string | null = null): void {
@@ -105,16 +142,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   private refreshAttention(): void {
-    const held = this.deps.gate.current;
-    this.status = {
-      ...this.status,
-      attention: {
-        conflicts: this.deps.conflictRepo.open().length,
-        quarantined: this.deps.quarantine.open().length,
-        heldPlan: held === null ? null : { id: held.id, reason: held.verdict.reason ?? 'confirmation required', affected: held.verdict.affected.map(describeOp) },
-      },
-      counts: { baseline: this.deps.baseline.count(), localFiles: this.lastSnapshot === null ? 0 : [...this.lastSnapshot.entries.values()].filter((e) => e.kind === 'file').length, remoteFiles: this.deps.mirror.files() },
-    };
+    this.status = { ...this.status, attention: this.computeAttention(), counts: this.computeCounts() };
   }
 
   /** The resting state after a cycle: attention if anything needs the user, else idle. */
@@ -334,7 +362,7 @@ export class SyncEngine extends EventEmitter {
       if (row === null || entry === undefined) return true;
       return row.localIno !== entry.ino || row.localSize !== entry.size || row.localMtimeMs !== entry.mtimeMs || row.localSha1 === null;
     };
-    const local = await localViewFromSnapshot(snapshot, this.deps.digests, needDigest, this.localRootAvailable);
+    const local = this.withHiddenPaths(await localViewFromSnapshot(snapshot, this.deps.digests, needDigest, this.localRootAvailable), snapshot, baseline);
     const remote = this.deps.mirror.view();
     const sets = this.deps.quarantine.sets();
     const plan = reconcile({ baseline, local, remote, quarantinedPaths: sets.paths, quarantinedUids: sets.uids });
@@ -353,9 +381,10 @@ export class SyncEngine extends EventEmitter {
     if (plan.conflicts.length > 0) {
       await this.deps.conflicts.handleNew(plan.conflicts);
       // Re-plan so the renamed copies are included in this cycle.
-      const local2 = await localViewFromSnapshot(await this.rescanLocal(), this.deps.digests, needDigest, this.localRootAvailable);
+      const snapshot2 = await this.rescanLocal();
       const base2 = new Map<string, BaselineItem>();
       for (const row of this.deps.baseline.all()) base2.set(row.relPath, baselineRowToItem(row));
+      const local2 = this.withHiddenPaths(await localViewFromSnapshot(snapshot2, this.deps.digests, needDigest, this.localRootAvailable), snapshot2, base2);
       const replanned = reconcile({ baseline: base2, local: local2, remote: this.deps.mirror.view(), quarantinedPaths: sets.paths, quarantinedUids: sets.uids });
       return this.gateAndExecute(replanned);
     }
@@ -407,7 +436,12 @@ export class SyncEngine extends EventEmitter {
     try {
       const summary = await this.executor.execute(plan);
       if (summary.stoppedEarly === 'disk_full') this.setStateSafely('error', 'disk full');
-      if (summary.stoppedEarly === 'auth') this.setStateSafely('needs_login', 'session rejected');
+      if (summary.stoppedEarly === 'auth') {
+        // A transfer that the server rejected clears the session, exactly as a rejected listing does,
+        // so a later login in the same process transitions back out of needs-login and resumes.
+        void this.deps.session?.handleRemoteError(summary.stoppedError);
+        this.setStateSafely('needs_login', 'session rejected');
+      }
       // Our own local writes: refresh the snapshot now so the next cycle never sees a stale view.
       const touched = new Set<string>();
       for (const o of plan.operations) {

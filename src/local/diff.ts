@@ -31,7 +31,9 @@ export interface DiffOptions {
 }
 
 function identity(e: LocalEntry): string {
-  return `${e.kind}:${String(e.dev)}:${String(e.ino)}`;
+  // Creation time is part of the identity: a rename keeps the inode's birthtime, but a new file that
+  // merely reused a freed inode has a newer one — so inode reuse is not mistaken for a move.
+  return `${e.kind}:${String(e.dev)}:${String(e.ino)}:${String(e.birthtimeMs)}`;
 }
 
 function under(parent: string, p: string): boolean {

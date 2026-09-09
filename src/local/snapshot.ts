@@ -24,6 +24,8 @@ export interface LocalEntry {
   /** 0 for directories. */
   size: number;
   mtimeMs: number;
+  /** Creation time, so inode reuse (a deleted file's inode taken by a new one) is not mistaken for a move. */
+  birthtimeMs: number;
 }
 
 export type UnsyncableReason = 'symlink' | 'special' | 'unreadable' | 'invalid_name';
@@ -125,7 +127,7 @@ export async function scanLocalTree(root: string, options: ScanOptions): Promise
       if (st.isSymbolicLink()) {
         unsyncable.push({ relPath: rel, reason: 'symlink' });
       } else if (st.isDirectory()) {
-        entries.set(rel, { relPath: rel, kind: 'dir', dev: st.dev, ino: st.ino, size: 0, mtimeMs: st.mtimeMs });
+        entries.set(rel, { relPath: rel, kind: 'dir', dev: st.dev, ino: st.ino, size: 0, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs });
         subdirs.push(rel);
       } else if (st.isFile()) {
         try {
@@ -134,7 +136,7 @@ export async function scanLocalTree(root: string, options: ScanOptions): Promise
           unsyncable.push({ relPath: rel, reason: 'unreadable', detail: errCode(error) });
           continue;
         }
-        entries.set(rel, { relPath: rel, kind: 'file', dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs });
+        entries.set(rel, { relPath: rel, kind: 'file', dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs });
       } else {
         unsyncable.push({ relPath: rel, reason: 'special' });
       }

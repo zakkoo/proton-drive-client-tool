@@ -76,6 +76,8 @@ function remoteFingerprintMismatch(node: RemoteNode | null, expected: RemoteFing
 
 export class Executor {
   private paused = false;
+  /** The remote error that stopped the run (auth), so the engine can clear the session. */
+  private stoppingError: unknown = undefined;
   private readonly cancel = new AbortController();
   private readonly createdRemoteDirs = new Map<string, string>();
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -138,6 +140,7 @@ export class Executor {
         }
         if (results.some((r) => r === 'auth')) {
           summary.stoppedEarly = 'auth';
+          summary.stoppedError = this.stoppingError;
           break;
         }
       } else {
@@ -146,6 +149,7 @@ export class Executor {
         i++;
         if (r === 'disk_full' || r === 'auth') {
           summary.stoppedEarly = r;
+          if (r === 'auth') summary.stoppedError = this.stoppingError;
           break;
         }
       }
@@ -231,6 +235,7 @@ export class Executor {
         if (remoteErr?.kind === 'auth') {
           if (current.status === 'in_progress') this.ctx.journal.fail(entry.id, message);
           else if (current.status === 'planned') this.ctx.journal.abandon(entry.id, message);
+          this.stoppingError = error;
           this.emit({ type: 'paused_for', reason: 'auth' });
           return 'auth';
         }

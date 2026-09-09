@@ -67,6 +67,12 @@ export class FakeRemote implements RemoteDrive {
   beforeUploadCommit: (() => Promise<void>) | undefined;
   /** Test hook invoked after all bytes were streamed and before the download completes. */
   beforeDownloadComplete: (() => Promise<void>) | undefined;
+  /**
+   * Test hook: when it returns true for a parent, `listChildren` reports that
+   * folder as empty even though it has children. Models an incomplete or empty
+   * remote listing without permanently removing anything.
+   */
+  listSuppressed: ((parentUid: string) => boolean) | undefined;
 
   constructor() {
     this.rootUid = this.newUid('root');
@@ -167,6 +173,19 @@ export class FakeRemote implements RemoteDrive {
     return this.toNode(rec);
   }
 
+  /** Seed a Proton document node (Docs/Sheets): a file-typed node the sync must not download or trash. */
+  seedProtonDocument(parentUid: string, name: string): RemoteNode {
+    const uid = this.newUid('file');
+    const rec: FakeNodeRecord = {
+      uid, parentUid, name, type: 'file', trashed: false, serverModifiedAt: this.clock(), claimedModifiedAt: this.clock(),
+      revisionUid: this.newUid('rev'), content: Buffer.from(''), claimedSha1: undefined, nameStatus: 'ok', isProtonDocument: true,
+    };
+    this.assertNoConflict(parentUid, name);
+    this.nodes.set(uid, rec);
+    this.emit({ type: 'node_created', nodeUid: uid, parentUid, isTrashed: false, scopeId: this.scopeId });
+    return this.toNode(rec);
+  }
+
   seedUndecryptable(parentUid: string): RemoteNode {
     const uid = this.newUid('file');
     const rec: FakeNodeRecord = {
@@ -259,6 +278,7 @@ export class FakeRemote implements RemoteDrive {
     const fault = this.takeFault('list');
     if (fault !== undefined) this.throwFault(fault, `list ${parentUid}`);
     if (!this.nodes.has(parentUid)) throw new RemoteError(`list ${parentUid}: not found`, 'not_found', false);
+    if (this.listSuppressed?.(parentUid) === true) return [];
     return [...this.nodes.values()].filter((n) => n.parentUid === parentUid).map((n) => this.toNode(n));
   }
 

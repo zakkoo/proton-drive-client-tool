@@ -26,6 +26,7 @@ import { BaselineRepo } from '../state/baseline.ts';
 import { JournalRepo } from '../state/journal.ts';
 import { QuarantineRepo } from '../state/misc.ts';
 import { StateStore } from '../state/store.ts';
+import type { ContentWorld } from './assertNoUserContentLost.js';
 import { FakeRemote } from './fakeRemote.js';
 
 export interface HarnessOptions {
@@ -139,6 +140,17 @@ export class SyncHarness {
 
   recycledContents(): string[] {
     return this.recycle.list().filter((i) => i.kind === 'file').map((i) => readFileSync(i.absolutePath, 'utf8'));
+  }
+
+  /** Every place user content can currently rest, for {@link assertNoUserContentLost}. */
+  world(): ContentWorld {
+    return {
+      localFiles: () => this.localFiles(),
+      remoteFiles: () => this.remoteFiles(),
+      recycledContents: () => this.recycledContents(),
+      remoteTrashedContents: () => this.remoteTrashedContents(),
+      supersededContents: () => this.fake.supersededContents(),
+    };
   }
 
   // ---- remote helpers ----------------------------------------------------

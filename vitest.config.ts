@@ -16,7 +16,16 @@ export default defineConfig({
           server,
           name: 'unit',
           include: ['src/**/*.test.ts'],
-          exclude: ['src/**/*.fault.test.ts'],
+          exclude: ['src/**/*.e2e.test.ts', 'src/**/*.fault.test.ts'],
+        },
+      },
+      {
+        resolve,
+        test: {
+          server,
+          name: 'e2e',
+          include: ['src/**/*.e2e.test.ts'],
+          testTimeout: 60_000,
         },
       },
       {

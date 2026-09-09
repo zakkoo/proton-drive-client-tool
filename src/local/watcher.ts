@@ -253,7 +253,7 @@ export class LocalWatcher {
         for (const key of [...entries.keys()]) {
           if (key.startsWith(`${rel}/`)) entries.delete(key);
         }
-        entries.set(rel, { relPath: rel, kind: 'dir', dev: st.dev, ino: st.ino, size: 0, mtimeMs: st.mtimeMs });
+        entries.set(rel, { relPath: rel, kind: 'dir', dev: st.dev, ino: st.ino, size: 0, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs });
         for (const e of sub.entries.values()) entries.set(`${rel}/${e.relPath}`, { ...e, relPath: `${rel}/${e.relPath}` });
         for (const u of sub.unsyncable) unsyncable.push({ ...u, relPath: `${rel}/${u.relPath}` });
         continue;
@@ -264,12 +264,12 @@ export class LocalWatcher {
         continue;
       }
       // Settle check: the file must look the same after a short pause and not be freshly modified.
-      const settled = options.skipSettle === true ? { dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs } : await this.settle(abs, st);
+      const settled = options.skipSettle === true ? { dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs } : await this.settle(abs, st);
       if (settled === null) {
         unsettled.push(rel);
         continue;
       }
-      entries.set(rel, { relPath: rel, kind: 'file', dev: settled.dev, ino: settled.ino, size: settled.size, mtimeMs: settled.mtimeMs });
+      entries.set(rel, { relPath: rel, kind: 'file', dev: settled.dev, ino: settled.ino, size: settled.size, mtimeMs: settled.mtimeMs, birthtimeMs: settled.birthtimeMs });
     }
 
     for (const rel of unsettled) this.dirty.add(rel);
@@ -291,7 +291,7 @@ export class LocalWatcher {
       return null;
     }
     if (second.size !== first.size || second.mtimeMs !== first.mtimeMs || second.ino !== first.ino) return null;
-    return { relPath: '', kind: 'file', dev: second.dev, ino: second.ino, size: second.size, mtimeMs: second.mtimeMs };
+    return { relPath: '', kind: 'file', dev: second.dev, ino: second.ino, size: second.size, mtimeMs: second.mtimeMs, birthtimeMs: second.birthtimeMs };
   }
 }
 

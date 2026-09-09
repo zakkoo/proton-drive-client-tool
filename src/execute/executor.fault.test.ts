@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { SimulatedCrashError, type ExecutorStep } from './types.js';
+import { assertNoUserContentLost, reachableContents } from '../testing/assertNoUserContentLost.js';
 import { SyncHarness } from '../testing/harness.js';
 
 /**
@@ -75,10 +76,6 @@ function mustSurvive(h: SyncHarness): Set<string> {
   return new Set([...h.localFiles().values(), ...h.remoteFiles().values()]);
 }
 
-function survivors(h: SyncHarness): Set<string> {
-  return new Set([...h.localFiles().values(), ...h.remoteFiles().values(), ...h.recycledContents(), ...h.remoteTrashedContents(), ...h.fake.supersededContents()]);
-}
-
 describe('executor under fault injection', () => {
   for (const scenario of scenarios) {
     it(`${scenario.name}: survives a crash at every executor step`, async () => {
@@ -88,7 +85,7 @@ describe('executor under fault injection', () => {
       const before = mustSurvive(probe);
       const plan = await probe.settle(8);
       expect(plan.operations).toEqual([]);
-      for (const c of before) expect(survivors(probe).has(c), `content ${c} lost in the clean run`).toBe(true);
+      assertNoUserContentLost(before, probe.world());
       probe.assertBaselineConsistent();
       probe.dispose();
       expect(steps.length).toBeGreaterThan(10);
@@ -118,7 +115,7 @@ describe('executor under fault injection', () => {
         expect(blocked, `step ${String(k)} (${steps[k] ?? ''}): unexpected blocks`).toEqual([]);
         const quarantinedPaths = new Set(h.quarantine.open().flatMap((q) => (q.relPath !== null ? [q.relPath] : [])));
         h.assertBaselineConsistent(quarantinedPaths);
-        const alive = survivors(h);
+        const alive = reachableContents(h.world());
         for (const c of expected) expect(alive.has(c), `step ${String(k)} (${steps[k] ?? ''}): content ${c} was lost`).toBe(true);
         // Quarantined items (unknown outcome) are the only allowed divergence; everything else converged.
         const local = [...h.localFiles().entries()].filter(([p]) => !quarantinedPaths.has(p)).sort();

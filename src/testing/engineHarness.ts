@@ -13,6 +13,7 @@ import { resolveAppPaths, type AppPaths } from '../config/paths.js';
 import { parseConfig, type SyncConfig } from '../config/schema.js';
 import { createEngine, type EngineBundle, type EngineFactoryOptions } from '../engine/factory.js';
 import type { EngineStatus } from '../engine/status.js';
+import { assertNoUserContentLost, contentWorld, type ContentWorld } from './assertNoUserContentLost.js';
 import { FakeRemote } from './fakeRemote.js';
 
 export class EngineHarness {
@@ -26,6 +27,8 @@ export class EngineHarness {
   config: SyncConfig;
   bundle: EngineBundle | null = null;
   private clock = 1_700_000_000_000;
+  /** Content the tool became responsible for (captured every time the sides converge). */
+  private readonly protectedContent = new Set<string>();
 
   private constructor(configOverrides: Record<string, unknown>) {
     this.base = mkdtempSync(path.join(os.tmpdir(), 'pds-engine-'));
@@ -46,6 +49,12 @@ export class EngineHarness {
 
   static create(configOverrides: Record<string, unknown> = {}): EngineHarness {
     return new EngineHarness(configOverrides);
+  }
+
+  /** The running bundle; throws if the engine was not started (keeps tests free of `!`). */
+  get live(): EngineBundle {
+    if (this.bundle === null) throw new Error('engine harness not started');
+    return this.bundle;
   }
 
   async start(options: Partial<EngineFactoryOptions> = {}): Promise<EngineBundle> {
@@ -111,6 +120,36 @@ export class EngineHarness {
     return this.fake.allNodes().find((n) => !n.isTrashed && this.fake.pathOf(n.uid) === `/Sync/${relPath}`)?.uid;
   }
 
+  recycledContents(): string[] {
+    return (this.bundle?.recycle.list() ?? [])
+      .filter((i) => i.kind === 'file')
+      .map((i) => readFileSync(i.absolutePath, 'utf8'));
+  }
+
+  /** Every place user content can currently rest. */
+  world(): ContentWorld {
+    return contentWorld({
+      localFiles: () => this.localFiles(),
+      remoteFiles: () => this.remoteFiles(),
+      fake: this.fake,
+      recycle: this.bundle?.recycle ?? null,
+    });
+  }
+
+  /**
+   * Assert nothing the tool converged has been destroyed. Called from engine
+   * e2e `afterEach`; a journey that legitimately purges content declares it with
+   * {@link allowLost} first.
+   */
+  assertNoUserContentLost(): void {
+    assertNoUserContentLost(this.protectedContent, this.world());
+  }
+
+  /** Forget content whose permanent removal is the point of a journey (e.g. recycle purge). */
+  allowLost(...contents: string[]): void {
+    for (const c of contents) this.protectedContent.delete(c);
+  }
+
   states(): string[] {
     const out: string[] = [];
     for (const s of this.statuses) if (out.at(-1) !== s.state) out.push(s.state);
@@ -134,7 +173,11 @@ export class EngineHarness {
     for (;;) {
       const s = this.bundle?.engine.getStatus();
       const same = JSON.stringify([...this.localFiles().entries()].sort()) === JSON.stringify([...this.remoteFiles().entries()].sort());
-      if (same && s !== undefined && (s.state === 'idle' || s.state === 'attention')) return;
+      if (same && s !== undefined && (s.state === 'idle' || s.state === 'attention')) {
+        // Once the sides agree, this content is the tool's responsibility from here on.
+        for (const c of this.localFiles().values()) this.protectedContent.add(c);
+        return;
+      }
       if (Date.now() - start > timeoutMs) throw new Error(`no convergence: state ${s?.state ?? 'none'} (${s?.reason ?? ''}); local ${JSON.stringify([...this.localFiles()])} remote ${JSON.stringify([...this.remoteFiles()])}`);
       await new Promise((r) => setTimeout(r, 25));
     }

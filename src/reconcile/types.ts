@@ -54,6 +54,12 @@ export interface LocalView {
   complete: boolean;
   /** False when the sync root itself is unavailable. */
   available: boolean;
+  /**
+   * Baseline paths that are still present locally but absent from `items`
+   * because they are now ignored or unsyncable (unreadable, a symlink, a
+   * special file). Their absence must never be read as a deletion.
+   */
+  hidden?: ReadonlySet<string>;
 }
 
 export interface RemoteView {

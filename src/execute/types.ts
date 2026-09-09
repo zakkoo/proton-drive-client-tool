@@ -80,6 +80,8 @@ export interface ExecutionSummary {
   failed: number;
   /** Set when execution stopped early (pause, cancel, or a pause-worthy condition). */
   stoppedEarly: 'paused' | 'cancelled' | 'disk_full' | 'auth' | null;
+  /** The error that caused an 'auth' stop, so the engine can clear the session. */
+  stoppedError?: unknown;
 }
 
 export type PlanForExecution = Pick<Plan, 'operations'>;

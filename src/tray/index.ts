@@ -15,7 +15,7 @@ import type { SyncEngine } from '../engine/engine.js';
 import type { EngineStatus } from '../engine/status.js';
 import { createLogger, type LogSink } from '../remote/proton/logger.js';
 import { DetailPageServer } from './detailPage.js';
-import { buildTrayModel, type MenuAction, type TrayModel } from './menuModel.js';
+import { buildTrayModel, dispatchMenuAction, type MenuAction, type TrayModel } from './menuModel.js';
 import { initialTracker, notificationsFor, type Notifier } from './notify.js';
 import { startStatusNotifierItem, type SniHandle } from './sni.js';
 
@@ -60,47 +60,16 @@ export async function startTray(options: TrayOptions): Promise<TrayHandle> {
   const onAction = (action: MenuAction): void => {
     void (async () => {
       try {
-        switch (action.type) {
-          case 'pause':
-            controlTarget.pause();
-            break;
-          case 'resume':
-            controlTarget.resume();
-            break;
-          case 'sync_now':
-            await controlTarget.syncNow();
-            break;
-          case 'open_folder':
-            open(options.config.localRoot);
-            break;
-          case 'open_recycle':
-            open(path.join(options.config.localRoot, INTERNAL_DIR_NAME, 'recycle'));
-            break;
-          case 'open_log':
-            open(options.paths.auditLogDir);
-            break;
-          case 'open_details':
-            open(page.url);
-            break;
-          case 'open_settings':
-            open(options.paths.configFile);
-            break;
-          case 'confirm_held':
-            await controlTarget.confirmHeldPlan(action.id);
-            break;
-          case 'reject_held':
-            controlTarget.rejectHeldPlan(action.id);
-            break;
-          case 'resolve_conflict':
-            await controlTarget.resolveConflict(action.id, action.choice);
-            break;
-          case 'release_quarantine':
-            controlTarget.releaseQuarantine(action.id);
-            break;
-          case 'quit':
-            await controlTarget.quit();
-            break;
-        }
+        // Engine-control actions are the shared, tested wiring; open_* actions need host paths.
+        if (await dispatchMenuAction(action, controlTarget)) return;
+        const opens: Partial<Record<MenuAction['type'], () => void>> = {
+          open_folder: () => { open(options.config.localRoot); },
+          open_recycle: () => { open(path.join(options.config.localRoot, INTERNAL_DIR_NAME, 'recycle')); },
+          open_log: () => { open(options.paths.auditLogDir); },
+          open_details: () => { open(page.url); },
+          open_settings: () => { open(options.paths.configFile); },
+        };
+        opens[action.type]?.();
       } catch (error) {
         logger.error(`tray action ${action.type} failed`, error);
       }

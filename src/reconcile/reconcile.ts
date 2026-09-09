@@ -211,6 +211,13 @@ export function reconcile(input: ReconcileInput): Plan {
       continue;
     }
 
+    // Present but hidden: an ignored or unsyncable path is still on disk, just omitted from the
+    // local view. Its absence is not a deletion, so never trash the remote node for it.
+    if (lc.state === 'deleted' && local.hidden?.has(base.relPath) === true) {
+      planner.block({ reason: 'orphan', relPath: base.relPath, remoteUid: base.remote.uid, detail: 'present locally but ignored or unsyncable; absence is not a delete' });
+      continue;
+    }
+
     // Local snapshot incomplete: a missing local item may simply be unlisted. Never treat as deleted.
     if (lc.state === 'deleted' && !local.complete) {
       planner.block({ reason: 'orphan', relPath: base.relPath, remoteUid: base.remote.uid, detail: 'local listing incomplete; absence is not trusted' });

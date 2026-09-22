@@ -38,6 +38,8 @@ describe('Omarchy package', () => {
     expect(readme).toContain('~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/install-engine');
     expect(readme).toContain('~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/install-engine --service');
     expect(readme).toContain('~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/remove-engine');
+    expect(readme).toContain('omarchy plugin update io.github.zakkoo.proton-drive');
+    expect(readme).toContain('systemctl --user restart proton-drive-sync.service');
     expect(readme).toMatch(/unofficial/i);
     expect(readme).toMatch(/unsandboxed/i);
     expect(readme).toContain('Node.js 24');

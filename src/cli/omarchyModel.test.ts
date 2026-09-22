@@ -13,6 +13,7 @@ interface Chip {
 interface ModelApi {
   chipModel(input: unknown): Chip;
   transferLine(transfer: unknown): string;
+  readingLines(lines: unknown): string[];
 }
 
 const sandbox: { ProtonDriveModel?: ModelApi } = {};
@@ -53,6 +54,45 @@ describe('bar chip model', () => {
     const states = ['starting', 'idle', 'scanning', 'syncing', 'paused', 'offline', 'throttled', 'attention', 'awaiting_confirmation', 'error', 'needs_login', 'stopped'];
     const labels = states.map((state) => model.chipModel({ installed: true, status: { state, attention: quiet } }).label);
     expect(new Set(labels).size).toBe(states.length);
+  });
+
+  it('keeps the library reading off the chip and out of the pending line', () => {
+    const idle = model.chipModel({
+      installed: true,
+      status: {
+        state: 'idle',
+        attention: quiet,
+        progress: null,
+        summaryLines: [
+          'In sync',
+          'Last sync: 2026-09-22T17:42:23.000Z, 2 files copied',
+          'Proton documents: 7 on Proton only (Docs and Sheets stay in the browser)',
+        ],
+      },
+    });
+    expect(idle.label).toBe('Drive');
+    expect(idle.label).not.toContain('Last sync');
+    expect(idle.label).not.toContain('Proton documents');
+    expect(model.readingLines([
+      'In sync',
+      'Pending: 1 up, 0 down, 0 other',
+      'Last sync: 2026-09-22T17:42:23.000Z, 2 files copied',
+      'Proton documents: 7 on Proton only (Docs and Sheets stay in the browser)',
+    ])).toEqual([
+      'Last sync: 2026-09-22T17:42:23.000Z, 2 files copied',
+      'Proton documents: 7 on Proton only (Docs and Sheets stay in the browser)',
+    ]);
+  });
+
+  it('the panel renders the helper under the headline and does not restate the sentences', () => {
+    const qml = readFileSync(path.resolve(import.meta.dirname, '../../omarchy/Panel.qml'), 'utf8');
+    const headline = qml.indexOf('text: root.glance');
+    const shown = qml.indexOf('model: root.reading.length');
+    expect(qml).toContain('ProtonDriveModel.readingLines');
+    expect(headline).toBeGreaterThan(-1);
+    expect(shown).toBeGreaterThan(headline);
+    expect(qml).not.toContain('on this computer');
+    expect(qml).not.toContain('Docs and Sheets');
   });
 
   it('formats a transfer with direction and percent', () => {

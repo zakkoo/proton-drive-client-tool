@@ -40,6 +40,19 @@ export interface RunProgress {
   total: number;
 }
 
+/** Paired rows, the two trees, and the one-sided leftovers a person can read. */
+export interface LibraryCounts {
+  /** Paired files plus paired folders. The mass-change brake reads this sum. */
+  baseline: number;
+  localFiles: number;
+  remoteFiles: number;
+  pairedFiles: number;
+  pairedFolders: number;
+  protonDocuments: number;
+  onlyLocal: number;
+  onlyRemote: number;
+}
+
 export interface EngineStatus {
   state: EngineState;
   reason: string | null;
@@ -47,16 +60,49 @@ export interface EngineStatus {
   dryRun: boolean;
   /** The remote event stream is silent or failing; full listings are used instead. */
   degraded: boolean;
+  /** When the latest check finished without error. */
   lastSuccessfulSyncAt: number | null;
+  /** Uploads and downloads completed in that check. Null until one has finished. */
+  lastRunFilesCopied: number | null;
+  /** When the whole Proton tree was last re-read. */
+  lastFullSyncAt: number | null;
   lastCycleAt: number | null;
   pending: { uploads: number; downloads: number; other: number };
   /** Upload and download progress for the current run. Not local files over remote files. */
   progress: RunProgress | null;
   transfers: TransferStatus[];
   attention: AttentionSummary;
-  counts: { baseline: number; localFiles: number; remoteFiles: number };
+  counts: LibraryCounts;
+  /** Relative paths of Proton documents, sorted. */
+  protonDocumentPaths: string[];
   /** Short human-readable lines for the tray tooltip. */
   summaryLines: string[];
+}
+
+const EMPTY_COUNTS: LibraryCounts = {
+  baseline: 0,
+  localFiles: 0,
+  remoteFiles: 0,
+  pairedFiles: 0,
+  pairedFolders: 0,
+  protonDocuments: 0,
+  onlyLocal: 0,
+  onlyRemote: 0,
+};
+
+const READING_PREFIXES = [
+  'Last sync: ',
+  'Last full sync: ',
+  'Files: ',
+  'Folders: ',
+  'Proton documents: ',
+  'Only on this computer: ',
+  'Only on Proton: ',
+] as const;
+
+/** The sentences that explain the last check and the library. Operational lines stay out. */
+export function readingLines(lines: readonly string[]): string[] {
+  return lines.filter((line) => READING_PREFIXES.some((prefix) => line.startsWith(prefix)));
 }
 
 /** The one line a person reads while a file run is moving. Null when there is nothing to count. */
@@ -109,14 +155,27 @@ export function initialStatus(dryRun: boolean, now: number): EngineStatus {
     dryRun,
     degraded: false,
     lastSuccessfulSyncAt: null,
+    lastRunFilesCopied: null,
+    lastFullSyncAt: null,
     lastCycleAt: null,
     pending: { uploads: 0, downloads: 0, other: 0 },
     progress: null,
     transfers: [],
     attention: { conflicts: 0, quarantined: 0, heldPlan: null },
-    counts: { baseline: 0, localFiles: 0, remoteFiles: 0 },
+    counts: { ...EMPTY_COUNTS },
+    protonDocumentPaths: [],
     summaryLines: ['Starting'],
   };
+}
+
+function filesCopiedPhrase(n: number): string {
+  if (n === 0) return 'no files copied';
+  if (n === 1) return '1 file copied';
+  return `${String(n)} files copied`;
+}
+
+function fileCountPhrase(n: number): string {
+  return n === 1 ? '1 file' : `${String(n)} files`;
 }
 
 export function summarize(status: EngineStatus): string[] {
@@ -145,10 +204,18 @@ export function summarize(status: EngineStatus): string[] {
   if (status.attention.conflicts > 0) lines.push(`${String(status.attention.conflicts)} conflict(s) to resolve`);
   if (status.attention.quarantined > 0) lines.push(`${String(status.attention.quarantined)} quarantined item(s)`);
   if (status.attention.heldPlan !== null) lines.push(`Held plan: ${status.attention.heldPlan.reason}`);
-  const c = status.counts;
-  if (c.baseline > 0 || c.localFiles > 0 || c.remoteFiles > 0) {
-    lines.push(`Files: ${String(c.localFiles)} local, ${String(c.remoteFiles)} remote (${String(c.baseline)} synced)`);
+  if (status.lastSuccessfulSyncAt !== null && status.lastRunFilesCopied !== null) {
+    lines.push(`Last sync: ${new Date(status.lastSuccessfulSyncAt).toISOString()}, ${filesCopiedPhrase(status.lastRunFilesCopied)}`);
   }
-  if (status.lastSuccessfulSyncAt !== null) lines.push(`Last full sync: ${new Date(status.lastSuccessfulSyncAt).toISOString()}`);
+  if (status.lastFullSyncAt !== null) lines.push(`Last full sync: ${new Date(status.lastFullSyncAt).toISOString()}`);
+  const c = status.counts;
+  if (c.localFiles > 0 || c.remoteFiles > 0 || c.pairedFiles > 0) {
+    lines.push(`Files: ${String(c.localFiles)} on this computer, ${String(c.remoteFiles)} on Proton, ${String(c.pairedFiles)} in sync`);
+  }
+  if (c.pairedFolders > 0) lines.push(`Folders: ${String(c.pairedFolders)} in sync`);
+  if (c.protonDocuments === 1) lines.push('Proton documents: 1 on Proton only (Docs and Sheets stay in the browser)');
+  else if (c.protonDocuments > 1) lines.push(`Proton documents: ${String(c.protonDocuments)} on Proton only (Docs and Sheets stay in the browser)`);
+  if (c.onlyLocal > 0) lines.push(`Only on this computer: ${fileCountPhrase(c.onlyLocal)}`);
+  if (c.onlyRemote > 0) lines.push(`Only on Proton: ${fileCountPhrase(c.onlyRemote)}`);
   return lines;
 }

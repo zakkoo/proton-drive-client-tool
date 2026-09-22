@@ -85,8 +85,44 @@ export class RemoteMirror {
   }
 
   files(): number {
-    let n = 0;
-    for (const node of this.nodes.values()) if (node.type === 'file' && !node.isTrashed) n++;
-    return n;
+    return this.library().files;
+  }
+
+  /**
+   * Non-trashed files, Proton document paths, and the other file paths.
+   * A file under a trashed ancestor has no path and is still counted in `files`.
+   */
+  library(): { files: number; protonDocumentPaths: string[]; syncableFilePaths: string[] } {
+    const protonDocumentPaths: string[] = [];
+    const syncableFilePaths: string[] = [];
+    let files = 0;
+    for (const node of this.nodes.values()) {
+      if (node.type !== 'file' || node.isTrashed) continue;
+      files++;
+      const rel = this.relPath(node);
+      if (rel === null) continue;
+      if (node.isProtonDocument) protonDocumentPaths.push(rel);
+      else syncableFilePaths.push(rel);
+    }
+    protonDocumentPaths.sort();
+    syncableFilePaths.sort();
+    return { files, protonDocumentPaths, syncableFilePaths };
+  }
+
+  /** Root-relative path, or null when an ancestor is trashed or the chain is broken. */
+  private relPath(node: RemoteNode): string | null {
+    const parts: string[] = [];
+    let current: RemoteNode | undefined = node;
+    const seen = new Set<string>();
+    while (current !== undefined && current.uid !== this.rootUid) {
+      if (seen.has(current.uid)) return null;
+      seen.add(current.uid);
+      if (current !== node && current.isTrashed) return null;
+      parts.push(current.name);
+      if (current.parentUid === undefined) return null;
+      current = this.nodes.get(current.parentUid);
+    }
+    if (current === undefined) return null;
+    return parts.reverse().join('/');
   }
 }

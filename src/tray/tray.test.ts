@@ -67,13 +67,44 @@ describe('tray menu model', () => {
   });
 
   it('shows the live file-run line and drops it once the run is idle', () => {
-    const syncing = buildTrayModel(status({ state: 'syncing', progress: { done: 34, total: 5685 }, summaryLines: ['Sync (34/5685)', 'Pending: 0 up, 5685 down, 0 other', 'Files: 553 local, 30620 remote (1 synced)'] }), [], []);
+    const syncing = buildTrayModel(status({
+      state: 'syncing',
+      progress: { done: 34, total: 5685 },
+      summaryLines: [
+        'Sync (34/5685)',
+        'Pending: 0 up, 5685 down, 0 other',
+        'Last sync: 2026-09-22T17:42:23.000Z, 2 files copied',
+        'Files: 30617 on this computer, 30624 on Proton, 30617 in sync',
+        'Proton documents: 7 on Proton only (Docs and Sheets stay in the browser)',
+        'Notes/Agenda',
+      ],
+    }), [], []);
     expect(labels(syncing.menu)[0]).toBe('Sync (34/5685)');
     expect(syncing.tooltip.description).toBe('Sync (34/5685)');
-    expect(labels(syncing.menu).some((label) => label.includes('Pending:') || label.includes('Files:'))).toBe(false);
-    const idle = buildTrayModel(status({ state: 'idle', progress: null, summaryLines: ['In sync', 'Files: 30618 local, 30625 remote (31152 synced)'] }), [], []);
+    expect(labels(syncing.menu)).toContain('Files: 30617 on this computer, 30624 on Proton, 30617 in sync');
+    expect(labels(syncing.menu).some((label) => label.includes('Pending:'))).toBe(false);
+    expect(labels(syncing.menu)).not.toContain('Notes/Agenda');
+    const idle = buildTrayModel(status({
+      state: 'idle',
+      progress: null,
+      summaryLines: [
+        'In sync',
+        'Last sync: 2026-09-22T17:42:23.000Z, 12 files copied',
+        'Files: 30617 on this computer, 30624 on Proton, 30617 in sync',
+        'Folders: 534 in sync',
+        'Proton documents: 7 on Proton only (Docs and Sheets stay in the browser)',
+      ],
+    }), [], []);
     expect(labels(idle.menu)[0]).toBe('In sync');
+    expect(labels(idle.menu)).toContain('Last sync: 2026-09-22T17:42:23.000Z, 12 files copied');
     expect(labels(idle.menu).join(' ')).not.toContain('34/5685');
+    expect(labels(idle.menu).join(' ')).not.toContain('Sync (');
+    expect(idle.tooltip.description).toContain('12 files copied');
+    expect(idle.tooltip.description).toContain('Files:');
+    expect(idle.tooltip.description).not.toContain('Sync (');
+    for (const label of ['Last sync: 2026-09-22T17:42:23.000Z, 12 files copied', 'Files: 30617 on this computer, 30624 on Proton, 30617 in sync', 'Folders: 534 in sync']) {
+      expect(idle.menu.find((item) => item.label === label)?.enabled).toBe(false);
+    }
   });
 
   it('rebuilds the open menu from the current snapshot', () => {

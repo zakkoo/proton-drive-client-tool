@@ -78,6 +78,9 @@ export class SyncEngine extends EventEmitter {
   private readonly transfers = new Map<string, TransferStatus>();
   private lastRemoteFailure: string | null = null;
   private readonly ignoreMatcher: IgnoreMatcher;
+  /** While file operations run, status publishes reuse this instead of walking the trees again. */
+  private libraryFrozen = false;
+  private libraryCache: { counts: EngineStatus['counts']; protonDocumentPaths: string[] } | null = null;
 
   constructor(private readonly deps: EngineDeps) {
     super();
@@ -106,7 +109,15 @@ export class SyncEngine extends EventEmitter {
   getStatus(): EngineStatus {
     // Recompute counts and attention live so a surface never shows a stale empty default while
     // the engine already has real values (e.g. counts right after a cycle, before the next publish).
-    const live = { ...this.status, transfers: [...this.transfers.values()], attention: this.computeAttention(), counts: this.computeCounts() };
+    const counts = this.computeCounts();
+    const live = {
+      ...this.status,
+      lastFullSyncAt: this.deps.mirror.lastFullListingAt,
+      transfers: [...this.transfers.values()],
+      attention: this.computeAttention(),
+      counts,
+      protonDocumentPaths: this.libraryCache?.protonDocumentPaths ?? [],
+    };
     return { ...live, summaryLines: summarize(live) };
   }
 
@@ -119,12 +130,36 @@ export class SyncEngine extends EventEmitter {
     };
   }
 
-  private computeCounts(): EngineStatus['counts'] {
-    return {
-      baseline: this.deps.baseline.count(),
-      localFiles: this.lastSnapshot === null ? 0 : [...this.lastSnapshot.entries.values()].filter((e) => e.kind === 'file').length,
-      remoteFiles: this.deps.mirror.files(),
+  private refreshLibraryCache(): void {
+    const kinds = this.deps.baseline.countByKind();
+    const pairedFilePaths = new Set(this.deps.baseline.filePaths());
+    const remote = this.deps.mirror.library();
+    const localPaths: string[] = [];
+    if (this.lastSnapshot !== null) {
+      for (const entry of this.lastSnapshot.entries.values()) if (entry.kind === 'file') localPaths.push(entry.relPath);
+    }
+    let onlyLocal = 0;
+    for (const rel of localPaths) if (!pairedFilePaths.has(rel)) onlyLocal++;
+    let onlyRemote = 0;
+    for (const rel of remote.syncableFilePaths) if (!pairedFilePaths.has(rel)) onlyRemote++;
+    this.libraryCache = {
+      protonDocumentPaths: remote.protonDocumentPaths,
+      counts: {
+        baseline: kinds.file + kinds.dir,
+        localFiles: localPaths.length,
+        remoteFiles: remote.files,
+        pairedFiles: kinds.file,
+        pairedFolders: kinds.dir,
+        protonDocuments: remote.protonDocumentPaths.length,
+        onlyLocal,
+        onlyRemote,
+      },
     };
+  }
+
+  private computeCounts(): EngineStatus['counts'] {
+    if (!this.libraryFrozen || this.libraryCache === null) this.refreshLibraryCache();
+    return this.libraryCache?.counts ?? this.status.counts;
   }
 
   private setState(state: EngineState, reason: string | null = null): void {
@@ -354,6 +389,7 @@ export class SyncEngine extends EventEmitter {
         return { plan: emptyPlan(), summary: null, held: false, skipped: `remote unavailable: ${this.lastRemoteFailure ?? ''}` };
       }
     }
+    this.refreshLibraryCache();
     const baselineRows = this.deps.baseline.all();
     const baseline = new Map<string, BaselineItem>();
     for (const row of baselineRows) baseline.set(row.relPath, baselineRowToItem(row));
@@ -432,6 +468,8 @@ export class SyncEngine extends EventEmitter {
 
   private async executePlan(plan: Plan): Promise<ExecutionSummary> {
     const fileTotal = plan.operations.filter((o) => o.kind === 'upload' || o.kind === 'download').length;
+    this.refreshLibraryCache();
+    this.libraryFrozen = true;
     this.status = { ...this.status, progress: fileTotal > 0 ? { done: 0, total: fileTotal } : null };
     this.setStateSafely('syncing');
     this.executor = new Executor(this.ctx());
@@ -459,15 +497,19 @@ export class SyncEngine extends EventEmitter {
     } finally {
       this.executor = null;
       this.transfers.clear();
+      this.libraryFrozen = false;
     }
   }
 
   private finishCycle(success: boolean): void {
     if (success) {
-      this.status = { ...this.status, lastSuccessfulSyncAt: this.now() };
+      const copied = this.status.progress?.done ?? 0;
+      this.status = { ...this.status, lastSuccessfulSyncAt: this.now(), lastRunFilesCopied: copied };
       const backups = this.deps.executorContext.store.discardPendingBackups();
       if (backups.length > 0) this.deps.audit.append({ kind: 'engine', message: `discarded ${String(backups.length)} migration backup(s) after a successful cycle` });
     }
+    this.libraryFrozen = false;
+    this.refreshLibraryCache();
     if (this.status.state === 'error' || this.status.state === 'needs_login' || this.status.state === 'paused' || this.status.state === 'stopped') {
       this.publish();
       return;

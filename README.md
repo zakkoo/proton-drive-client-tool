@@ -36,6 +36,18 @@ The chip tells you what the engine is doing. Open it to pause, resume, sync now,
 
 `proton-drive-sync doctor` reports whether you are installed, signed in, and running. `proton-drive-sync details` prints the loopback details page for that running engine.
 
+## Reinstall and restart
+
+The chip and the engine update on their own. Update the plugin, build that folder into the engine, then restart the service so the running engine is the new build. Your sync folder, Proton session, and config stay.
+
+```sh
+omarchy plugin update io.github.zakkoo.proton-drive
+~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/install-engine
+systemctl --user restart proton-drive-sync.service
+```
+
+`omarchy plugin update` fast-forwards the installed plugin to the latest published commit. A plugin folder you have edited yourself is left as it is. `install-engine` replaces the engine runtime. The restart command is the background service from `install-engine --service`. If you started `proton-drive-sync` in a terminal, quit that process and start it again.
+
 ## Remove
 
 Stop the engine while the plugin folder is still on disk:

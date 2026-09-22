@@ -56,15 +56,16 @@ describe('detail page after a sync', () => {
 
     document.body.innerHTML = `
       <span id="state"></span><span id="reason"></span>
-      <span id="counts"></span><span id="lastsync"></span>
-      <p id="lines"></p><div id="held"></div>
+      <p id="lines"></p><div id="proton-documents"></div><div id="held"></div>
       <table id="transfers"></table><table id="conflicts"></table>
       <table id="quarantine"></table><table id="recycle"></table>`;
     applySnapshot(document, data);
 
     expect(document.getElementById('state')?.textContent).toBe('idle');
-    expect(document.getElementById('counts')?.textContent).toBe('2 local · 2 remote · 2 synced');
-    expect(document.getElementById('lastsync')?.textContent).not.toBe('never');
+    expect(document.getElementById('lines')?.textContent).toContain('Last sync:');
+    expect(document.getElementById('lines')?.textContent).toContain('Files: 2 on this computer, 2 on Proton, 2 in sync');
+    expect(document.getElementById('lines')?.textContent).not.toContain('synced');
+    expect(document.getElementById('proton-documents')?.textContent).toBe('');
   });
 
   it('serves the page behind the run token and 404s an unknown token', async () => {
@@ -75,8 +76,9 @@ describe('detail page after a sync', () => {
 
     const ok = await httpGet(server.url);
     expect(ok.status).toBe(200);
-    // The served page carries the tested renderer and the counts element.
-    expect(ok.body).toContain('id="counts"');
+    // The served page carries the tested renderer and the library section.
+    expect(ok.body).toContain('id="lines"');
+    expect(ok.body).toContain('id="proton-documents"');
     expect(ok.body).toContain('function applySnapshot');
 
     const bad = await httpGet(server.url.replace(server.token, 'deadbeef'));

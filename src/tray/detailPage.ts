@@ -158,8 +158,8 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.3rem .5
 </style></head><body>
 <h1>Proton Drive Sync</h1>
 <p><span class="state" id="state"></span> <span class="muted" id="reason"></span></p>
-<p class="muted">Files: <span id="counts"></span> &middot; Last full sync: <span id="lastsync"></span></p>
 <p id="lines" class="muted"></p>
+<div id="proton-documents"></div>
 <p><button onclick="act('pause')">Pause</button><button onclick="act('resume')">Resume</button><button onclick="act('sync')">Sync now</button></p>
 <div id="held"></div>
 <h2>Transfers</h2><table id="transfers"></table>

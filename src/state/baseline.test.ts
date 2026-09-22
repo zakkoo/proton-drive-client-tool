@@ -52,6 +52,18 @@ describe('BaselineRepo', () => {
     expect(repo.count()).toBe(1);
   });
 
+  it('counts files and folders separately, and the two totals add up to count()', () => {
+    if (store === null) throw new Error('store');
+    const repo = new BaselineRepo(store);
+    repo.upsert(row({ relPath: 'src', nodeUid: 'd1', kind: 'dir' }));
+    repo.upsert(row({ relPath: 'src/a.txt', nodeUid: 'f1', parentUid: 'd1' }));
+    repo.upsert(row({ relPath: 'b.txt', nodeUid: 'f2' }));
+    const kinds = repo.countByKind();
+    expect(kinds).toEqual({ file: 2, dir: 1 });
+    expect(kinds.file + kinds.dir).toBe(repo.count());
+    expect(repo.filePaths()).toEqual(['b.txt', 'src/a.txt']);
+  });
+
   it('never links one identity to two rows: replacing a path or a node uid removes the stale row', () => {
     if (store === null) throw new Error('store');
     const repo = new BaselineRepo(store);

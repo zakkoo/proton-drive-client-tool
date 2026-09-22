@@ -86,6 +86,31 @@ function chipModel(input) {
   return view("not_running", false)
 }
 
+var READING_PREFIXES = [
+  "Last sync: ",
+  "Last full sync: ",
+  "Files: ",
+  "Folders: ",
+  "Proton documents: ",
+  "Only on this computer: ",
+  "Only on Proton: ",
+]
+
+function readingLines(lines) {
+  var out = []
+  var list = lines || []
+  for (var i = 0; i < list.length; i++) {
+    var line = String(list[i])
+    for (var j = 0; j < READING_PREFIXES.length; j++) {
+      if (line.indexOf(READING_PREFIXES[j]) === 0) {
+        out.push(line)
+        break
+      }
+    }
+  }
+  return out
+}
+
 function transferLine(transfer) {
   var item = transfer || {}
   var direction = item.kind === "upload" ? "↑ " : "↓ "
@@ -98,4 +123,5 @@ function transferLine(transfer) {
 var ProtonDriveModel = {
   chipModel: chipModel,
   transferLine: transferLine,
+  readingLines: readingLines,
 }

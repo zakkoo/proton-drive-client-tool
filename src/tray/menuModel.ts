@@ -2,7 +2,7 @@
  * Pure tray model: icon, tooltip and menu derived from the engine status and
  * the attention lists. No D-Bus here, so it is fully unit-testable.
  */
-import { glanceText, type EngineState, type EngineStatus } from '../engine/status.js';
+import { glanceText, readingLines, type EngineState, type EngineStatus } from '../engine/status.js';
 import type { ConflictEntry, QuarantineEntry } from '../state/misc.ts';
 
 export type MenuAction =
@@ -69,7 +69,9 @@ export function buildTrayModel(status: EngineStatus, conflicts: ConflictEntry[],
 
   const menu: MenuItem[] = [];
   const glance = glanceText(status);
-  menu.push(item(glance ?? status.summaryLines[0] ?? status.state, undefined, false));
+  const headline = glance ?? status.summaryLines[0] ?? status.state;
+  menu.push(item(headline, undefined, false));
+  for (const line of readingLines(status.summaryLines)) menu.push(item(line, undefined, false));
   menu.push(separator());
   if (status.state === 'paused') menu.push(item('Resume syncing', { type: 'resume' }));
   else menu.push(item('Pause syncing', { type: 'pause' }, status.state !== 'stopped' && status.state !== 'needs_login'));
@@ -117,13 +119,13 @@ export function buildTrayModel(status: EngineStatus, conflicts: ConflictEntry[],
   menu.push(separator());
   menu.push(item('Quit', { type: 'quit' }));
 
-  const headline = glance ?? status.summaryLines[0] ?? status.state;
   const title = `Proton Drive Sync: ${headline}`;
+  const description = glance ?? [headline, ...readingLines(status.summaryLines)].join('\n');
   return {
     iconName: iconFor(status.state),
     sniStatus,
     title,
-    tooltip: { title: 'Proton Drive Sync', description: headline },
+    tooltip: { title: 'Proton Drive Sync', description },
     menu,
   };
 }

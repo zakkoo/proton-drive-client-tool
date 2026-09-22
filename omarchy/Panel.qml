@@ -25,6 +25,11 @@ Panel {
     var status = service && service.status
     return status && status.transfers ? status.transfers : []
   }
+  readonly property var reading: {
+    var status = root.service && root.service.status
+    var lines = status && status.summaryLines ? status.summaryLines : []
+    return ProtonDriveModel.readingLines(lines)
+  }
   readonly property string glance: {
     var status = service && service.status
     if (!status || !status.progress) return ""
@@ -80,6 +85,19 @@ Panel {
           font.pixelSize: Style.font.subtitle
           font.bold: true
           wrapMode: Text.WordWrap
+        }
+
+        Repeater {
+          model: root.reading.length
+          delegate: Text {
+            required property int index
+            width: parent.width
+            text: String(root.reading[index])
+            color: root.barForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+            wrapMode: Text.WordWrap
+          }
         }
 
         Text {

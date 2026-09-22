@@ -34,10 +34,12 @@ export function applySnapshot(doc: Document, data: DetailData): void {
 
   set('state', s.state.replace(/_/g, ' '));
   set('reason', s.reason ?? '');
-  set('lines', s.summaryLines.join(' · '));
-  const c = s.counts;
-  set('counts', `${String(c.localFiles)} local · ${String(c.remoteFiles)} remote · ${String(c.baseline)} synced`);
-  set('lastsync', s.lastSuccessfulSyncAt === null ? 'never' : new Date(s.lastSuccessfulSyncAt).toISOString());
+  set('lines', s.summaryLines.join('\n'));
+  const docs = doc.getElementById('proton-documents');
+  if (docs !== null) {
+    const paths = s.protonDocumentPaths;
+    docs.innerHTML = paths.length === 0 ? '' : '<h2>Proton documents</h2><ul>' + paths.map((p) => '<li>' + esc(p) + '</li>').join('') + '</ul>';
+  }
 
   const held = s.attention.heldPlan;
   const heldEl = doc.getElementById('held');

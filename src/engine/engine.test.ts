@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs';
+import { rmSync, unlinkSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EngineHarness } from '../testing/engineHarness.js';
@@ -51,6 +52,77 @@ describe('SyncEngine', () => {
     expect(climbed?.pending.downloads).toBe(3);
     expect(h.bundle?.engine.getStatus().state).toBe('idle');
     expect(h.bundle?.engine.getStatus().progress).toBeNull();
+  });
+
+  it('records files copied by a finished check, and a failed check keeps that record', async () => {
+    h.fake.seedFile(h.remoteRootUid, 'a.txt', 'A');
+    await h.start();
+    await h.waitForConvergence();
+    expect(h.statuses.some((s) => s.lastRunFilesCopied === 1)).toBe(true);
+
+    const before = h.live.engine.getStatus();
+    expect(before.lastFullSyncAt).not.toBeNull();
+    await h.live.engine.syncNow();
+    await h.waitFor(['idle']);
+    const empty = h.live.engine.getStatus();
+    expect(empty.lastRunFilesCopied).toBe(0);
+    expect(empty.summaryLines).toContainEqual(expect.stringContaining('no files copied'));
+    expect(empty.lastFullSyncAt).toBe(before.lastFullSyncAt);
+    const keptAt = empty.lastSuccessfulSyncAt;
+    expect(keptAt).not.toBeNull();
+
+    // A check that wants to upload, but cannot, must not replace the last finished check.
+    h.live.engine.pause();
+    await h.waitFor(['paused']);
+    h.fake.seedPermanentDelete(h.remoteRootUid);
+    h.write('bad.txt', 'B');
+    const started = Date.now();
+    while (Date.now() - started < 3000 && h.live.engine.getStatus().counts.localFiles < 2) await new Promise((r) => setTimeout(r, 30));
+    expect(h.live.engine.getStatus().counts.localFiles).toBeGreaterThanOrEqual(2);
+    h.live.engine.resume();
+    await h.waitFor(['error']);
+    const failed = h.live.engine.getStatus();
+    expect(failed.lastSuccessfulSyncAt).toBe(keptAt);
+    expect(failed.lastRunFilesCopied).toBe(0);
+    expect(failed.lastFullSyncAt).toBe(before.lastFullSyncAt);
+  });
+
+  it('splits paired files, Proton documents, and files that exist on only one side', async () => {
+    h.write('keep.txt', 'K');
+    h.write('gone.txt', 'G');
+    await h.start();
+    await h.waitForConvergence();
+    h.live.engine.pause();
+    await h.waitFor(['paused']);
+
+    unlinkSync(path.join(h.root, 'gone.txt'));
+    h.write('only-local.txt', 'L');
+    h.fake.seedFile(h.remoteRootUid, 'extra.txt', 'E');
+    h.fake.seedProtonDocument(h.remoteRootUid, 'Agenda');
+
+    const start = Date.now();
+    let status = h.live.engine.getStatus();
+    while (Date.now() - start < 5000) {
+      status = h.live.engine.getStatus();
+      const c = status.counts;
+      if (c.localFiles === 2 && c.remoteFiles === 4 && c.protonDocuments === 1 && c.onlyLocal === 1 && c.onlyRemote === 1) break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    expect(status.counts).toMatchObject({
+      localFiles: 2,
+      remoteFiles: 4,
+      pairedFiles: 2,
+      protonDocuments: 1,
+      onlyLocal: 1,
+      onlyRemote: 1,
+    });
+    expect(status.protonDocumentPaths).toEqual(['Agenda']);
+    expect(status.summaryLines).toEqual(expect.arrayContaining([
+      'Files: 2 on this computer, 4 on Proton, 2 in sync',
+      'Only on this computer: 1 file',
+      'Only on Proton: 1 file',
+      'Proton documents: 1 on Proton only (Docs and Sheets stay in the browser)',
+    ]));
   });
 
   it('pause stops syncing and resume picks up the backlog; startPaused starts paused', async () => {

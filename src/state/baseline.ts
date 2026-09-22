@@ -68,6 +68,21 @@ export class BaselineRepo {
     return row.n;
   }
 
+  /** Paired files and paired folders as separate totals. */
+  countByKind(): { file: number; dir: number } {
+    const out = { file: 0, dir: 0 };
+    const rows = this.store.db.prepare('SELECT kind, COUNT(*) AS n FROM baseline GROUP BY kind').all() as { kind: string; n: number }[];
+    for (const row of rows) {
+      if (row.kind === 'file' || row.kind === 'dir') out[row.kind] = row.n;
+    }
+    return out;
+  }
+
+  /** Relative paths of paired files. */
+  filePaths(): string[] {
+    return (this.store.db.prepare(`SELECT rel_path FROM baseline WHERE kind = 'file' ORDER BY rel_path`).all() as { rel_path: string }[]).map((row) => row.rel_path);
+  }
+
   all(): BaselineRow[] {
     return (this.store.db.prepare(`SELECT ${COLUMNS} FROM baseline ORDER BY rel_path`).all() as unknown as DbRow[]).map(fromDb);
   }

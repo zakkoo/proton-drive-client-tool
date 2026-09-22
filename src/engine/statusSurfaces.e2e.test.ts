@@ -47,12 +47,13 @@ describe('status surfaces', () => {
     expect(status.counts.remoteFiles, 'remote count reflects the two synced files').toBe(2);
     expect(status.lastSuccessfulSyncAt, 'a last-successful-sync time is recorded').not.toBeNull();
 
-    // summarize() (tray tooltip / CLI) is not empty of counts when files exist.
+    // summarize() (tray tooltip / CLI) names the last check and the files, without a folder-inflated total.
     const lines = summarize(status);
-    expect(lines.some((l) => l.includes('Files: 2 local, 2 remote (2 synced)')), lines.join(' | ')).toBe(true);
-    expect(lines.some((l) => l.includes('Last full sync'))).toBe(true);
-    // The human CLI status shows the same.
-    expect(formatStatus(status).some((l) => l.includes('Files: 2 local'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('Last sync:') && l.includes('copied')), lines.join(' | ')).toBe(true);
+    expect(lines.some((l) => l === 'Files: 2 on this computer, 2 on Proton, 2 in sync'), lines.join(' | ')).toBe(true);
+    expect(lines.join(' ')).not.toContain('Files: 2 local');
+    expect(lines.join(' ')).not.toContain('synced)');
+    expect(formatStatus(status).some((l) => l.includes('Files: 2 on this computer'))).toBe(true);
   });
 
   it('during a slowed transfer, the engine status and the formatter show the in-flight transfer and non-zero pending', async () => {

@@ -34,6 +34,12 @@ export interface AttentionSummary {
   heldPlan: { id: string; reason: string; affected: string[] } | null;
 }
 
+/** Files finished and files to transfer in the current run. Null when no file run is active. */
+export interface RunProgress {
+  done: number;
+  total: number;
+}
+
 export interface EngineStatus {
   state: EngineState;
   reason: string | null;
@@ -44,11 +50,22 @@ export interface EngineStatus {
   lastSuccessfulSyncAt: number | null;
   lastCycleAt: number | null;
   pending: { uploads: number; downloads: number; other: number };
+  /** Upload and download progress for the current run. Not local files over remote files. */
+  progress: RunProgress | null;
   transfers: TransferStatus[];
   attention: AttentionSummary;
   counts: { baseline: number; localFiles: number; remoteFiles: number };
   /** Short human-readable lines for the tray tooltip. */
   summaryLines: string[];
+}
+
+/** The one line a person reads while a file run is moving. Null when there is nothing to count. */
+export function glanceText(status: Pick<EngineStatus, 'state' | 'progress'>): string | null {
+  const progress = status.progress;
+  if (progress === null || progress.total <= 0) return null;
+  if (status.state === 'syncing') return `Sync (${String(progress.done)}/${String(progress.total)})`;
+  if (status.state === 'paused') return `Paused (${String(progress.done)}/${String(progress.total)})`;
+  return null;
 }
 
 /** Every allowed transition; anything else is a programming error. */
@@ -94,6 +111,7 @@ export function initialStatus(dryRun: boolean, now: number): EngineStatus {
     lastSuccessfulSyncAt: null,
     lastCycleAt: null,
     pending: { uploads: 0, downloads: 0, other: 0 },
+    progress: null,
     transfers: [],
     attention: { conflicts: 0, quarantined: 0, heldPlan: null },
     counts: { baseline: 0, localFiles: 0, remoteFiles: 0 },
@@ -117,7 +135,8 @@ export function summarize(status: EngineStatus): string[] {
     needs_login: 'Login required',
     stopped: 'Stopped',
   };
-  lines.push(status.reason !== null ? `${label[status.state]}: ${status.reason}` : label[status.state]);
+  const glance = glanceText(status);
+  lines.push(glance ?? (status.reason !== null ? `${label[status.state]}: ${status.reason}` : label[status.state]));
   if (status.dryRun) lines.push('DRY RUN: no changes are made');
   if (status.degraded) lines.push('Event stream degraded; using periodic listings');
   if (status.transfers.length > 0) lines.push(`${String(status.transfers.length)} transfer(s) in progress`);

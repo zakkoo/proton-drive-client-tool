@@ -63,7 +63,13 @@ Item {
   }
 
   function poll() {
-    if (!root.launcherOk || cli.running || root.queue.length > 0) return
+    // The launcher is created after the plugin loads. A watch on a path that
+    // did not exist yet never fires, so keep rereading it until it appears.
+    if (!root.launcherOk) {
+      launcherFile.reload()
+      return
+    }
+    if (cli.running || root.queue.length > 0) return
     root.enqueue(["doctor", "--json"], "doctor")
   }
 

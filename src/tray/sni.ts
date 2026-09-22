@@ -27,10 +27,17 @@ function layoutOf(item: MenuItem, depth: number): Layout {
   return [item.id, itemProps(item), children];
 }
 
+/** Rebuild the menu from the current snapshot and tell the shell to fetch it. */
+export function menuOnAboutToShow(current: () => MenuItem[], apply: (items: MenuItem[]) => void): boolean {
+  apply(current());
+  return true;
+}
+
 class DbusMenu extends Interface {
   model: MenuItem[] = [];
   revision = 1;
   onAction: (action: MenuAction) => void = () => undefined;
+  onBeforeShow: () => void = () => undefined;
 
   get Version(): number {
     return 3;
@@ -77,7 +84,10 @@ class DbusMenu extends Interface {
   }
 
   AboutToShow(_id: number): boolean {
-    return false;
+    this.onBeforeShow();
+    return menuOnAboutToShow(() => this.model, (items) => {
+      this.model = items;
+    });
   }
 
   AboutToShowGroup(_ids: number[]): [number[], number[]] {
@@ -252,7 +262,7 @@ export interface SniHandle {
  * Connect to the session bus, export the item and menu, and register with the
  * StatusNotifierWatcher. Rejects when no bus or no watcher is available.
  */
-export async function startStatusNotifierItem(initial: TrayModel, onAction: (action: MenuAction) => void, options: { busAddress?: string; timeoutMs?: number } = {}): Promise<SniHandle> {
+export async function startStatusNotifierItem(initial: TrayModel, onAction: (action: MenuAction) => void, options: { busAddress?: string; timeoutMs?: number; refresh?: () => TrayModel } = {}): Promise<SniHandle> {
   const bus = dbus.sessionBus(options.busAddress !== undefined ? { busAddress: options.busAddress } : undefined);
   const busName = `org.kde.StatusNotifierItem-${String(process.pid)}-1`;
   const timeout = options.timeoutMs ?? 5000;
@@ -280,6 +290,12 @@ export async function startStatusNotifierItem(initial: TrayModel, onAction: (act
     const menu = new DbusMenu('com.canonical.dbusmenu');
     menu.model = initial.menu;
     menu.onAction = onAction;
+    menu.onBeforeShow = () => {
+      const next = options.refresh?.();
+      if (next === undefined) return;
+      sni.setModel(next);
+      menu.setModel(next.menu);
+    };
     sni.onActivate = () => { onAction({ type: 'open_details' }); };
     await withTimeout(bus.requestName(busName, 0), 'requesting the bus name');
     bus.export('/StatusNotifierItem', sni);

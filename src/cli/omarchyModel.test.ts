@@ -29,6 +29,14 @@ describe('bar chip model', () => {
     expect(model.chipModel({ installed: true, doctor: { loggedIn: true, configured: false } }).state).toBe('not_configured');
     expect(model.chipModel({ installed: true, doctor: { loggedIn: true, configured: true, running: false } }).state).toBe('not_running');
     expect(model.chipModel({ installed: true, status: { state: 'syncing', attention: quiet } })).toMatchObject({ state: 'syncing', urgent: false, label: 'Sync' });
+    expect(model.chipModel({ installed: true, status: { state: 'syncing', attention: quiet, progress: { done: 34, total: 5685 } } })).toMatchObject({ label: 'Sync (34/5685)', tooltip: 'Sync (34/5685)' });
+    expect(model.chipModel({ installed: true, status: { state: 'paused', attention: quiet, progress: { done: 34, total: 5685 } } })).toMatchObject({ label: 'Paused (34/5685)' });
+    expect(model.chipModel({ installed: true, status: { state: 'scanning', attention: quiet, progress: null } })).toMatchObject({ label: 'Scan' });
+    expect(model.chipModel({ installed: true, status: { state: 'idle', attention: quiet, progress: { done: 10, total: 10 } } })).toMatchObject({ label: 'Drive' });
+    expect(model.chipModel({
+      installed: true,
+      status: { state: 'syncing', attention: { conflicts: 1, quarantined: 0, heldPlan: null }, progress: { done: 34, total: 5685 } },
+    })).toMatchObject({ state: 'attention', label: 'Check' });
     const attention = model.chipModel({
       installed: true,
       status: { state: 'idle', attention: { conflicts: 1, quarantined: 0, heldPlan: null } },

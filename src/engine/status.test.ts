@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { allTransitions, canTransition, initialStatus, summarize, type EngineState } from './status.js';
+import { allTransitions, canTransition, glanceText, initialStatus, summarize, type EngineState } from './status.js';
 
 const STATES: EngineState[] = ['starting', 'idle', 'scanning', 'syncing', 'paused', 'offline', 'throttled', 'attention', 'awaiting_confirmation', 'error', 'needs_login', 'stopped'];
 
@@ -45,5 +45,20 @@ describe('engine state machine', () => {
     expect(lines).toContain('2 quarantined item(s)');
     expect(lines).toContain('Held plan: too many deletes');
     expect(lines.at(-1)).toMatch(/Last full sync: 2026-01-01/);
+  });
+
+  it('leads with the file-run glance and leaves pending counts unchanged', () => {
+    const base = initialStatus(false, 1);
+    expect(base.progress).toBeNull();
+    const syncing = summarize({ ...base, state: 'syncing', progress: { done: 34, total: 5685 }, pending: { uploads: 0, downloads: 5685, other: 0 } });
+    expect(syncing[0]).toBe('Sync (34/5685)');
+    expect(syncing).toContain('Pending: 0 up, 5685 down, 0 other');
+    const paused = summarize({ ...base, state: 'paused', progress: { done: 34, total: 5685 } });
+    expect(paused[0]).toBe('Paused (34/5685)');
+    const idle = summarize({ ...base, state: 'idle', progress: null, counts: { baseline: 2, localFiles: 2, remoteFiles: 2 } });
+    expect(idle[0]).toBe('In sync');
+    expect(idle.join(' ')).not.toContain('Sync (');
+    expect(glanceText({ state: 'scanning', progress: null })).toBeNull();
+    expect(glanceText({ state: 'idle', progress: { done: 10, total: 10 } })).toBeNull();
   });
 });

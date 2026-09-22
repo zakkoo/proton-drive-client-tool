@@ -6,6 +6,7 @@ import { EngineHarness } from '../testing/engineHarness.js';
 import { DetailPageServer } from './detailPage.js';
 import { buildTrayModel, indexMenu, type MenuItem } from './menuModel.js';
 import { initialTracker, notificationsFor } from './notify.js';
+import { menuOnAboutToShow } from './sni.js';
 import { startTray } from './index.js';
 
 function status(over: Partial<EngineStatus>): EngineStatus {
@@ -63,6 +64,30 @@ describe('tray menu model', () => {
     // Every id is unique across the tree.
     const ids = [...indexMenu(m.menu).keys()];
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('shows the live file-run line and drops it once the run is idle', () => {
+    const syncing = buildTrayModel(status({ state: 'syncing', progress: { done: 34, total: 5685 }, summaryLines: ['Sync (34/5685)', 'Pending: 0 up, 5685 down, 0 other', 'Files: 553 local, 30620 remote (1 synced)'] }), [], []);
+    expect(labels(syncing.menu)[0]).toBe('Sync (34/5685)');
+    expect(syncing.tooltip.description).toBe('Sync (34/5685)');
+    expect(labels(syncing.menu).some((label) => label.includes('Pending:') || label.includes('Files:'))).toBe(false);
+    const idle = buildTrayModel(status({ state: 'idle', progress: null, summaryLines: ['In sync', 'Files: 30618 local, 30625 remote (31152 synced)'] }), [], []);
+    expect(labels(idle.menu)[0]).toBe('In sync');
+    expect(labels(idle.menu).join(' ')).not.toContain('34/5685');
+  });
+
+  it('rebuilds the open menu from the current snapshot', () => {
+    let live = 'Sync (34/5685)';
+    let shown = '';
+    expect(menuOnAboutToShow(() => [{ id: 1, label: live, enabled: false }], (items) => {
+      shown = items[0]?.label ?? '';
+    })).toBe(true);
+    expect(shown).toBe('Sync (34/5685)');
+    live = 'In sync';
+    menuOnAboutToShow(() => [{ id: 1, label: live, enabled: false }], (items) => {
+      shown = items[0]?.label ?? '';
+    });
+    expect(shown).toBe('In sync');
   });
 });
 

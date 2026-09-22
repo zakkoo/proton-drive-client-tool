@@ -21,13 +21,19 @@ Panel {
     var attention = status && status.attention
     return attention ? attention.heldPlan : null
   }
-  readonly property var summaryLines: {
-    var status = service && service.status
-    return status && status.summaryLines ? status.summaryLines : []
-  }
   readonly property var transfers: {
     var status = service && service.status
     return status && status.transfers ? status.transfers : []
+  }
+  readonly property string glance: {
+    var status = service && service.status
+    if (!status || !status.progress) return ""
+    var total = Number(status.progress.total)
+    var done = Number(status.progress.done)
+    if (!(total > 0)) return ""
+    if (status.state === "syncing") return "Sync (" + done + "/" + total + ")"
+    if (status.state === "paused") return "Paused (" + done + "/" + total + ")"
+    return ""
   }
 
   function open() { root.controller.show() }
@@ -64,9 +70,11 @@ Panel {
 
         Text {
           width: parent.width
-          text: root.needsBuiltinBar || !root.service
-            ? "Proton Drive needs the built-in Omarchy bar."
-            : (root.service.chip ? root.service.chip.tooltip : "Proton Drive")
+          text: root.glance !== ""
+            ? root.glance
+            : (root.needsBuiltinBar || !root.service
+              ? "Proton Drive needs the built-in Omarchy bar."
+              : (root.service.chip ? root.service.chip.tooltip : "Proton Drive"))
           color: root.barForeground
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.subtitle
@@ -145,19 +153,6 @@ Panel {
             color: root.bar ? root.bar.urgent : root.barForeground
             wrapMode: Text.WordWrap
             font.pixelSize: Style.font.bodySmall
-          }
-        }
-
-        Repeater {
-          model: root.summaryLines.length
-          delegate: Text {
-            required property int index
-            width: content.width
-            text: String(root.summaryLines[index])
-            color: root.barForeground
-            wrapMode: Text.WordWrap
-            font.pixelSize: Style.font.body
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
           }
         }
 

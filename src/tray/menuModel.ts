@@ -2,7 +2,7 @@
  * Pure tray model: icon, tooltip and menu derived from the engine status and
  * the attention lists. No D-Bus here, so it is fully unit-testable.
  */
-import type { EngineState, EngineStatus } from '../engine/status.js';
+import { glanceText, type EngineState, type EngineStatus } from '../engine/status.js';
 import type { ConflictEntry, QuarantineEntry } from '../state/misc.ts';
 
 export type MenuAction =
@@ -68,11 +68,8 @@ export function buildTrayModel(status: EngineStatus, conflicts: ConflictEntry[],
   const sniStatus: TrayModel['sniStatus'] = attention || status.state === 'attention' || status.state === 'error' || status.state === 'needs_login' || status.state === 'awaiting_confirmation' ? 'NeedsAttention' : 'Active';
 
   const menu: MenuItem[] = [];
-  for (const line of status.summaryLines.slice(0, 4)) menu.push(item(line, undefined, false));
-  for (const t of status.transfers.slice(0, 5)) {
-    const pct = t.total !== undefined && t.total > 0 ? ` ${String(Math.round((t.bytes / t.total) * 100))}%` : '';
-    menu.push(item(`${t.kind === 'upload' ? '↑' : '↓'} ${t.relPath}${pct}`, undefined, false));
-  }
+  const glance = glanceText(status);
+  menu.push(item(glance ?? status.summaryLines[0] ?? status.state, undefined, false));
   menu.push(separator());
   if (status.state === 'paused') menu.push(item('Resume syncing', { type: 'resume' }));
   else menu.push(item('Pause syncing', { type: 'pause' }, status.state !== 'stopped' && status.state !== 'needs_login'));
@@ -120,12 +117,13 @@ export function buildTrayModel(status: EngineStatus, conflicts: ConflictEntry[],
   menu.push(separator());
   menu.push(item('Quit', { type: 'quit' }));
 
-  const title = `Proton Drive Sync: ${status.summaryLines[0] ?? status.state}`;
+  const headline = glance ?? status.summaryLines[0] ?? status.state;
+  const title = `Proton Drive Sync: ${headline}`;
   return {
     iconName: iconFor(status.state),
     sniStatus,
     title,
-    tooltip: { title: 'Proton Drive Sync', description: status.summaryLines.join('\n') },
+    tooltip: { title: 'Proton Drive Sync', description: headline },
     menu,
   };
 }

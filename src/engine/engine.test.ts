@@ -33,6 +33,24 @@ describe('SyncEngine', () => {
     const status = h.bundle?.engine.getStatus();
     expect(status?.lastSuccessfulSyncAt).not.toBeNull();
     expect(status?.counts.baseline).toBe(4);
+    expect(status?.progress).toBeNull();
+  });
+
+  it('counts finished file transfers in the run and drops the fraction when idle', async () => {
+    h.fake.seedFile(h.remoteRootUid, 'a.txt', 'A');
+    h.fake.seedFile(h.remoteRootUid, 'b.txt', 'B');
+    h.fake.seedFile(h.remoteRootUid, 'c.txt', 'C');
+    await h.start();
+    await h.waitForConvergence();
+    const during = h.statuses.filter((s) => s.state === 'syncing' && s.progress !== null);
+    expect(during.length).toBeGreaterThan(0);
+    expect(during.every((s) => s.progress?.total === 3)).toBe(true);
+    const dones = during.map((s) => s.progress?.done ?? 0);
+    expect(Math.max(...dones)).toBeGreaterThan(Math.min(...dones));
+    const climbed = during.find((s) => s.progress?.done === 1);
+    expect(climbed?.pending.downloads).toBe(3);
+    expect(h.bundle?.engine.getStatus().state).toBe('idle');
+    expect(h.bundle?.engine.getStatus().progress).toBeNull();
   });
 
   it('pause stops syncing and resume picks up the backlog; startPaused starts paused', async () => {

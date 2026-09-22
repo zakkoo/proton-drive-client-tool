@@ -338,6 +338,7 @@ export class SyncEngine extends EventEmitter {
   private async cycleOnce(reason: string): Promise<CycleResult> {
     if (this.userPaused) return { plan: emptyPlan(), summary: null, held: false, skipped: 'paused' };
     if (this.deps.session !== undefined && this.deps.session.current !== 'logged_in') return { plan: emptyPlan(), summary: null, held: false, skipped: 'needs login' };
+    this.status = { ...this.status, progress: null };
     this.setStateSafely('scanning', reason);
     this.status = { ...this.status, lastCycleAt: this.now() };
 
@@ -430,6 +431,8 @@ export class SyncEngine extends EventEmitter {
   }
 
   private async executePlan(plan: Plan): Promise<ExecutionSummary> {
+    const fileTotal = plan.operations.filter((o) => o.kind === 'upload' || o.kind === 'download').length;
+    this.status = { ...this.status, progress: fileTotal > 0 ? { done: 0, total: fileTotal } : null };
     this.setStateSafely('syncing');
     this.executor = new Executor(this.ctx());
     if (this.userPaused) this.executor.pause();
@@ -469,6 +472,7 @@ export class SyncEngine extends EventEmitter {
       this.publish();
       return;
     }
+    this.status = { ...this.status, progress: null };
     this.setStateSafely(this.restingState());
   }
 
@@ -490,6 +494,10 @@ export class SyncEngine extends EventEmitter {
       case 'operation_completed':
       case 'operation_failed':
       case 'operation_skipped':
+        if (e.type === 'operation_completed' && (e.operation.kind === 'upload' || e.operation.kind === 'download')) {
+          const progress = this.status.progress;
+          if (progress !== null) this.status = { ...this.status, progress: { done: progress.done + 1, total: progress.total } };
+        }
         if (e.type !== 'operation_failed' || !e.retryable) this.transfers.delete(e.operation.id);
         break;
       case 'paused_for':

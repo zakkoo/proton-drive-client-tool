@@ -77,6 +77,7 @@ export async function startTray(options: TrayOptions): Promise<TrayHandle> {
   let sni: SniHandle;
   try {
     sni = await startStatusNotifierItem(model(), onAction, {
+      refresh: () => model(),
       ...(options.busAddress !== undefined ? { busAddress: options.busAddress } : {}),
       ...(options.sniTimeoutMs !== undefined ? { timeoutMs: options.sniTimeoutMs } : {}),
     });

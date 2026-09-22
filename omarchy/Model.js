@@ -48,6 +48,16 @@ function view(state, urgent) {
   }
 }
 
+function glance(status) {
+  if (!status || !status.progress) return ""
+  var total = Number(status.progress.total)
+  var done = Number(status.progress.done)
+  if (!(total > 0)) return ""
+  if (status.state === "syncing") return "Sync (" + done + "/" + total + ")"
+  if (status.state === "paused") return "Paused (" + done + "/" + total + ")"
+  return ""
+}
+
 function userAttention(status) {
   var attention = status && status.attention ? status.attention : {}
   if (attention.heldPlan) return "awaiting_confirmation"
@@ -63,7 +73,11 @@ function chipModel(input) {
     var override = userAttention(status)
     var state = override || status.state
     var urgent = state === "attention" || state === "awaiting_confirmation" || state === "error" || state === "needs_login"
-    return view(state, urgent)
+    var base = view(state, urgent)
+    if (override) return base
+    var line = glance(status)
+    if (line) return { state: state, urgent: urgent, label: line, tooltip: line }
+    return base
   }
   var doctor = source.doctor
   if (!doctor) return view("starting", false)

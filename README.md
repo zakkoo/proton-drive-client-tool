@@ -9,7 +9,7 @@ Proton does not ship a sync client for Linux yet. This plugin is an unofficial s
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/zakkoo/proton-drive-client-tool.git --enable
+omarchy plugin add https://github.com/zakkoo/proton-drive-sync.git --enable
 ```
 
 The chip lands on the right of the built-in bar. It needs that bar. A replacement bar cannot see this plugin's service.

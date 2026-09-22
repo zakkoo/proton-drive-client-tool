@@ -33,7 +33,7 @@ describe('Omarchy package', () => {
   });
 
   it('speaks to an Omarchy user and leaves personal install notes out', () => {
-    expect(readme).toContain('omarchy plugin add https://github.com/zakkoo/proton-drive-client-tool.git --enable');
+    expect(readme).toContain('omarchy plugin add https://github.com/zakkoo/proton-drive-sync.git --enable');
     expect(readme).toContain('omarchy plugin remove io.github.zakkoo.proton-drive');
     expect(readme).toContain('~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/install-engine');
     expect(readme).toContain('~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/install-engine --service');

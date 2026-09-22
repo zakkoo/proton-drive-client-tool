@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { history } from '../audit/history.js';
+import { saveConfigFile } from '../config/configFile.js';
+import { adoptedRootIdentity, readRootIdentity } from '../config/localRoot.js';
 import { ConfigError } from '../config/schema.js';
 import { runSetup } from '../config/setup.js';
 import { ControlClient, ControlServer } from '../engine/control.js';
@@ -133,9 +135,44 @@ export async function setup(deps: CommandDeps, args: string[], json: boolean): P
   }
 }
 
+/**
+ * Btrfs assigns a new device number when the volume is mounted. A config that
+ * still has the old number describes the same directory; store the live one
+ * so the next comparison can use the stable volume key.
+ */
+function refreshRecordedRoot(deps: CommandDeps, json: boolean): void {
+  const { ctx } = deps;
+  const recorded = ctx.config?.localRootIdentity;
+  const localRoot = ctx.config?.localRoot;
+  if (ctx.config === null || recorded === undefined || localRoot === undefined) return;
+  let live;
+  try {
+    live = readRootIdentity(localRoot);
+  } catch {
+    return;
+  }
+  const adopted = adoptedRootIdentity(recorded, live);
+  if (adopted === null) return;
+  const persisted = { ...ctx.config, localRootIdentity: adopted };
+  try {
+    saveConfigFile(ctx.paths.configFile, persisted);
+    ctx.config = persisted;
+    ctx.audit.append({
+      kind: 'safety',
+      op: 'preflight',
+      message: `recorded sync root device ${String(recorded.dev)} as ${String(adopted.dev)} for the same directory`,
+      outcome: 'ok',
+    });
+  } catch (error) {
+    ctx.config = persisted;
+    if (!json) deps.stderr(`Could not update the recorded sync root identity in ${ctx.paths.configFile}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function run(deps: CommandDeps, flags: { dryRun: boolean; paused: boolean; tray: boolean }, json: boolean): Promise<number> {
   const { ctx } = deps;
   if (ctx.config === null) throw new CliError('not configured; run `proton-drive-sync setup <local-dir> <remote-folder>` first');
+  refreshRecordedRoot(deps, json);
   // Command-line flags apply to this invocation only. Persisting them silently turned every
   // later `run` into a dry run, with no flag to undo it; the config file is the persistent switch.
   const config = { ...ctx.config, dryRun: ctx.config.dryRun || flags.dryRun, startPaused: ctx.config.startPaused || flags.paused };

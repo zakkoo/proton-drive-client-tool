@@ -1,4 +1,4 @@
-import { accessSync, constants, statSync } from 'node:fs';
+import { accessSync, constants, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,13 @@ export interface RootIdentity {
    * runners) from the original — `dev`/`ino` alone cannot.
    */
   birthtimeMs?: number;
+  /**
+   * Stable btrfs identity (`btrfs:<source>:subvolid=<id>`). Optional.
+   * Btrfs `dev` is an anonymous device number assigned at mount time, so the
+   * same directory reports a different `dev` after a reboot. Configs written
+   * before this field existed have only `dev` and `ino`.
+   */
+  fsKey?: string;
 }
 
 export interface LocalRootContext {
@@ -75,16 +82,89 @@ export function validateLocalRoot(candidate: string, ctx: LocalRootContext = {})
   return problems;
 }
 
-/** The file system identity of a directory, used to detect a replaced or remounted root. */
+/** The file system identity of a directory, used to detect a replaced root. */
 export function readRootIdentity(root: string): RootIdentity {
   const st = statSync(root);
-  return { dev: st.dev, ino: st.ino, birthtimeMs: st.birthtimeMs };
+  const fsKey = filesystemKey(path.resolve(root));
+  return { dev: st.dev, ino: st.ino, birthtimeMs: st.birthtimeMs, ...(fsKey !== undefined ? { fsKey } : {}) };
+}
+
+/**
+ * Btrfs volume key for `root`, from the mount that covers it. Undefined when
+ * mount info is unavailable or the directory is not on btrfs: other filesystems
+ * have a stable `dev`, and a bare `tmpfs` source would collide across mounts.
+ */
+export function filesystemKey(root: string, mountinfo = readMountinfo()): string | undefined {
+  if (mountinfo === undefined) return undefined;
+  let best: { len: number; key: string } | undefined;
+  for (const line of mountinfo.split('\n')) {
+    const parsed = parseMountinfoLine(line);
+    if (parsed === undefined) continue;
+    if (parsed.fstype !== 'btrfs' || parsed.subvolid === undefined) continue;
+    if (!covers(parsed.mountPoint, root)) continue;
+    if (best === undefined || parsed.mountPoint.length > best.len) {
+      best = { len: parsed.mountPoint.length, key: `btrfs:${parsed.source}:subvolid=${parsed.subvolid}` };
+    }
+  }
+  return best?.key;
+}
+
+/** Live identity to store when it is the same directory with a refreshed device number or filesystem key. Null when nothing should be written. */
+export function adoptedRootIdentity(recorded: RootIdentity, live: RootIdentity): RootIdentity | null {
+  if (!sameIdentity(live, recorded)) return null;
+  if (recorded.dev === live.dev && recorded.ino === live.ino && recorded.birthtimeMs === live.birthtimeMs && recorded.fsKey === live.fsKey) return null;
+  return live;
 }
 
 export function sameIdentity(a: RootIdentity, b: RootIdentity): boolean {
-  if (a.dev !== b.dev || a.ino !== b.ino) return false;
+  if (a.ino !== b.ino) return false;
   // Only compare creation time when both identities carry it (older configs did not); a difference
   // there means the directory was replaced even if the inode was reused.
-  if (a.birthtimeMs !== undefined && b.birthtimeMs !== undefined) return a.birthtimeMs === b.birthtimeMs;
-  return true;
+  if (a.birthtimeMs !== undefined && b.birthtimeMs !== undefined && a.birthtimeMs !== b.birthtimeMs) return false;
+  if (a.fsKey !== undefined && b.fsKey !== undefined) return a.fsKey === b.fsKey;
+  if (a.dev === b.dev) return true;
+  // A config from before fsKey existed compared the anonymous btrfs device number.
+  // The inode still identifies the directory; the live key says which volume it is.
+  const key = a.fsKey ?? b.fsKey;
+  return key?.startsWith('btrfs:') === true;
+}
+
+function readMountinfo(): string | undefined {
+  try {
+    return readFileSync('/proc/self/mountinfo', 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+interface MountLine {
+  mountPoint: string;
+  fstype: string;
+  source: string;
+  subvolid: string | undefined;
+}
+
+function parseMountinfoLine(line: string): MountLine | undefined {
+  const sep = line.indexOf(' - ');
+  if (sep < 0) return undefined;
+  const mountPoint = line.slice(0, sep).split(' ')[4];
+  const right = line.slice(sep + 3).split(' ');
+  const fstype = right[0];
+  const source = right[1];
+  if (mountPoint === undefined || fstype === undefined || source === undefined) return undefined;
+  const superOptions = right.slice(2).join(' ');
+  return {
+    mountPoint: unescapeMount(mountPoint),
+    fstype,
+    source: unescapeMount(source),
+    subvolid: /(?:^|,)subvolid=(\d+)/.exec(superOptions)?.[1],
+  };
+}
+
+function unescapeMount(value: string): string {
+  return value.replace(/\\([0-7]{3})/g, (_, oct: string) => String.fromCharCode(Number.parseInt(oct, 8)));
+}
+
+function covers(mountPoint: string, root: string): boolean {
+  return mountPoint === '/' || root === mountPoint || root.startsWith(`${mountPoint}/`);
 }

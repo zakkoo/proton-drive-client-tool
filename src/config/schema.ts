@@ -6,6 +6,8 @@
  * capped below 100 so deleting the entire tree always requires confirmation.
  */
 
+import type { RootIdentity } from './localRoot.js';
+
 export type CredentialsStoreKind = 'keychain' | 'unsafe_file';
 
 export interface SafetyConfig {
@@ -47,7 +49,7 @@ export interface SyncConfig {
   /** Recorded at setup: the remote root node identifier. */
   remoteRootNodeUid?: string;
   /** Recorded at setup: the local root's file system identity. */
-  localRootIdentity?: { dev: number; ino: number; birthtimeMs?: number };
+  localRootIdentity?: RootIdentity;
   /** Glob ignore patterns (picomatch syntax), relative to the sync root. */
   ignore: string[];
   safety: SafetyConfig;
@@ -247,8 +249,9 @@ export function parseConfig(raw: unknown): SyncConfig {
   }
   const identity = merged['localRootIdentity'];
   if (identity !== undefined) {
-    if (!isRecord(identity) || !Number.isInteger(identity['dev']) || !Number.isInteger(identity['ino']) || (identity['birthtimeMs'] !== undefined && typeof identity['birthtimeMs'] !== 'number')) {
-      problems.push('localRootIdentity must be { dev: integer, ino: integer, birthtimeMs?: number } when present');
+    const fsKey = isRecord(identity) ? identity['fsKey'] : undefined;
+    if (!isRecord(identity) || !Number.isInteger(identity['dev']) || !Number.isInteger(identity['ino']) || (identity['birthtimeMs'] !== undefined && typeof identity['birthtimeMs'] !== 'number') || (fsKey !== undefined && (typeof fsKey !== 'string' || fsKey === ''))) {
+      problems.push('localRootIdentity must be { dev: integer, ino: integer, birthtimeMs?: number, fsKey?: string } when present');
     }
   }
 

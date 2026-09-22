@@ -41,7 +41,9 @@ export async function runPreflight(input: PreflightInput): Promise<PreflightResu
   }
   const identity = readRootIdentity(input.root);
   if (!sameIdentity(identity, input.expectedRootIdentity)) {
-    return { ok: false, reason: 'sync_root_changed', detail: `sync root ${input.root} is a different directory than at setup (dev/ino ${String(identity.dev)}/${String(identity.ino)} vs ${String(input.expectedRootIdentity.dev)}/${String(input.expectedRootIdentity.ino)})` };
+    const recorded = input.expectedRootIdentity;
+    const fs = identity.fsKey !== undefined || recorded.fsKey !== undefined ? `, fs ${identity.fsKey ?? 'none'} vs ${recorded.fsKey ?? 'none'}` : '';
+    return { ok: false, reason: 'sync_root_changed', detail: `sync root ${input.root} is a different directory than at setup (dev/ino ${String(identity.dev)}/${String(identity.ino)} vs ${String(recorded.dev)}/${String(recorded.ino)}${fs})` };
   }
   const integrity = input.storeIntegrity();
   if (integrity !== 'ok') return { ok: false, reason: 'store_corrupt', detail: integrity };

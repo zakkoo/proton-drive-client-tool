@@ -67,6 +67,8 @@ describe('parseConfig', () => {
     expect(problemsOf({ ...minimal, safety: { nope: 1 } })).toContainEqual('unknown setting safety.nope');
     expect(problemsOf({ ...minimal, dryRun: 'yes' })).toContainEqual('dryRun must be a boolean');
     expect(problemsOf({ ...minimal, localRootIdentity: { dev: 1 } })).toContainEqual(expect.stringContaining('localRootIdentity'));
+    expect(problemsOf({ ...minimal, localRootIdentity: { dev: 1, ino: 2, fsKey: '' } })).toContainEqual(expect.stringContaining('localRootIdentity'));
+    expect(problemsOf({ ...minimal, localRootIdentity: { dev: 59, ino: 605696, fsKey: 'btrfs:/dev/mapper/root:subvolid=257' } })).toEqual([]);
     expect(problemsOf({ ...minimal, remoteRootNodeUid: '' })).toContainEqual(expect.stringContaining('remoteRootNodeUid'));
     expect(problemsOf({ ...minimal, version: 2 })).toContainEqual(expect.stringContaining('version'));
     expect(problemsOf(null)).toEqual(['configuration must be an object']);

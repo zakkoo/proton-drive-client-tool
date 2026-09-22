@@ -61,6 +61,10 @@ Before executing a plan, the system SHALL verify that the sync root exists and i
 - **WHEN** the sync root's file system identity differs from the recorded one
 - **THEN** the engine pauses with "sync root changed" and executes nothing
 
+#### Scenario: Btrfs device number changes
+- **WHEN** the directory inode matches the recorded one and the volume is the same btrfs subvolume, but the kernel device number differs from the number stored at setup
+- **THEN** the engine treats the directory as the same sync root and continues
+
 #### Scenario: Insufficient disk space
 - **WHEN** free space is below the plan's requirement
 - **THEN** downloads are held and the engine reports "disk space low"

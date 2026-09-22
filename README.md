@@ -1,10 +1,10 @@
 # Proton Drive Sync
 
-One folder on this machine. One folder in Proton Drive. They stay the same.
+Proton Drive Sync keeps one folder on this machine and one folder in Proton Drive the same. Create, edit, rename, or move a file on either side and the other side follows. A delete is not thrown away: here it goes to a recycle folder, and in Proton Drive it goes to Trash. A large delete or replace waits for you. If both sides change the same file, you keep both copies.
 
-A delete does not vanish. On this machine it waits in a recycle folder, and in Proton Drive it goes to Trash. If one pass would delete or replace a large share of your files, sync stops and waits for you. If both sides change the same file, you keep both copies.
+Sign-in and Drive access are based on Proton's official [Drive SDK](https://github.com/ProtonDriveApps/sdk). The account code in this repo is a Node port of that repository. The two-way sync around it is this project.
 
-This is an unofficial plugin. It is not affiliated with Proton AG or the Omarchy project. Plugin code runs unsandboxed, with your user privileges, inside the Omarchy shell.
+Proton does not ship a sync client for Linux yet. This plugin is an unofficial stand-in for Omarchy until Proton releases its own. It is not affiliated with Proton AG or the Omarchy project.
 
 ## Install
 
@@ -54,7 +54,7 @@ omarchy plugin remove io.github.zakkoo.proton-drive
 
 ## What it needs
 
-- Omarchy with the built-in bar
+- Omarchy with the built-in bar. The plugin runs unsandboxed, with your user privileges, inside the shell
 - Node.js 24 or newer
 - A Secret Service for the Proton session, which Omarchy already runs
 - `@protontech/drive-sdk`, `@protontech/crypto`, and `@parcel/watcher`, fetched by the engine installer from this repo's lockfile

@@ -9,7 +9,7 @@ import { loadConfigFile } from '../config/configFile.js';
 import { resolveAppPaths } from '../config/paths.js';
 import { LoginError } from '../remote/proton/auth.js';
 import { FakeRemote } from '../testing/fakeRemote.js';
-import { CliError, dispatch, type CommandDeps, type CommandRuntime } from './commands.js';
+import { CliError, dispatch, doctorReport, type CommandDeps, type CommandRuntime } from './commands.js';
 import { parseCli } from './main.js';
 
 let base: string;
@@ -55,6 +55,7 @@ function makeDeps(): CommandDeps {
     stdout: (l) => stdout.push(l),
     stderr: (l) => stderr.push(l),
     openBrowser: () => undefined,
+    sessionPresent: () => Promise.resolve(loggedIn),
     runUntil,
     engineTimers: { watcherDebounceMs: 100, watcherSettleMs: 30, feedPollMs: 60, triggerDebounceMs: 20 },
   };
@@ -198,5 +199,78 @@ describe('CLI', () => {
 
   it('run refuses to start when not configured', async () => {
     await expect(cli('run', '--no-tray')).rejects.toThrow(/not configured/);
+  });
+
+  it('doctor --json reports a boolean login flag and drops session material', async () => {
+    const secret = 'SESSION-SECRET-VALUE';
+    deps = makeDeps();
+    deps.sessionPresent = () => Promise.resolve(secret.length > 0);
+    (deps.ctx as { session?: string }).session = secret;
+    expect(await dispatch(deps, parseCli(['doctor', '--json']))).toBe(0);
+    const parsed = JSON.parse(stdout.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(parsed['loggedIn']).toBe(true);
+    expect(typeof parsed['loggedIn']).toBe('boolean');
+    expect(parsed['configured']).toBe(false);
+    expect(parsed['running']).toBe(false);
+    expect(parsed['detailUrl']).toBeNull();
+    expect(parsed['localRoot']).toBeNull();
+    expect(parsed['remoteRoot']).toBeNull();
+    expect(stdout.join('\n')).not.toContain(secret);
+    expect(parsed).not.toHaveProperty('session');
+
+    const input = {
+      nodeOk: true,
+      configured: false,
+      loggedIn: false,
+      running: false,
+      localRoot: null,
+      remoteRoot: null,
+      detailUrl: null,
+      session: secret,
+    };
+    const leaked = doctorReport(input);
+    expect(JSON.stringify(leaked)).not.toContain(secret);
+    expect(leaked.loggedIn).toBe(false);
+
+    deps = makeDeps();
+    deps.sessionPresent = () => Promise.resolve(false);
+    stdout = [];
+    expect(await dispatch(deps, parseCli(['doctor', '--json']))).toBe(0);
+    expect((JSON.parse(stdout.at(-1) ?? '{}') as { loggedIn: boolean }).loggedIn).toBe(false);
+  });
+
+  it('details page is served with --no-tray and only while the engine is running', async () => {
+    loggedIn = true;
+    expect(await cli('setup', root, '/my-files/Sync')).toBe(0);
+    expect(await cli('details', '--json')).toBe(3);
+    expect(stdout.at(-1)).toMatch(/not running|running": false/);
+
+    let trayStarted = false;
+    const runDeps = makeDeps();
+    runDeps.startTray = () => {
+      trayStarted = true;
+      return Promise.resolve({ dispose: () => Promise.resolve() });
+    };
+    const stop = stopRun;
+    const running = dispatch(runDeps, parseCli(['run', '--no-tray']));
+    let url = '';
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      stdout = [];
+      if ((await cli('details', '--json')) === 0) {
+        url = (JSON.parse(stdout.at(-1) ?? '{}') as { url?: string }).url ?? '';
+        if (url.startsWith('http://127.0.0.1:')) break;
+      }
+    }
+    expect(trayStarted).toBe(false);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]+\/$/);
+    const page = await fetch(url);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('Proton Drive Sync');
+
+    stop?.();
+    expect(await running).toBe(0);
+    expect(await cli('details')).toBe(3);
+    expect(stdout.at(-1)).toMatch(/not running/);
   });
 });

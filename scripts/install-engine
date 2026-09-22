@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Install the Proton Drive Sync engine outside the Omarchy plugin checkout.
+# Pass --service to also enable a user unit that runs it without a tray icon.
+set -euo pipefail
+
+PLUGIN_ID='io.github.zakkoo.proton-drive'
+MARKER="installed-by=${PLUGIN_ID}"
+
+fail() {
+  echo "install-engine: $*" >&2
+  exit 1
+}
+
+PLUGIN_DIR=$(cd "$(dirname "$0")/.." && pwd)
+SERVICE=0
+for arg in "$@"; do
+  case "$arg" in
+    --service) SERVICE=1 ;;
+    -h | --help)
+      echo "Usage: install-engine [--service]"
+      exit 0
+      ;;
+    *) fail "unknown option: $arg" ;;
+  esac
+done
+
+if ! command -v node >/dev/null 2>&1; then
+  fail "Node.js 24 or newer is required"
+fi
+if ! node -e 'const major = Number(process.versions.node.split(".")[0]); if (!(major >= 24)) process.exit(1)'; then
+  fail "Node.js 24 or newer is required (found $(node -v 2>/dev/null || echo unknown))"
+fi
+
+DATA_HOME=${XDG_DATA_HOME:-${HOME:?}/.local/share}
+RUNTIME="${DATA_HOME}/proton-drive-sync/runtime"
+LAUNCHER="${HOME:?}/.local/bin/proton-drive-sync"
+UNIT_DIR=${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user
+UNIT="${UNIT_DIR}/proton-drive-sync.service"
+
+plugin_real=$(realpath -m "$PLUGIN_DIR")
+runtime_real=$(realpath -m "$RUNTIME")
+if [[ $runtime_real == "$plugin_real" || $runtime_real == "$plugin_real"/* ]]; then
+  fail "runtime must sit outside the plugin directory"
+fi
+if [[ -L $RUNTIME ]]; then
+  fail "refusing symlinked runtime path: $RUNTIME"
+fi
+if [[ -e $RUNTIME && ! -f $RUNTIME/.installed-by ]]; then
+  fail "refusing to replace $RUNTIME"
+fi
+if [[ -f $RUNTIME/.installed-by ]] && ! grep -qx "$PLUGIN_ID" "$RUNTIME/.installed-by"; then
+  fail "refusing to replace $RUNTIME"
+fi
+
+launcher_is_ours() {
+  [[ -f $LAUNCHER && ! -L $LAUNCHER ]] || return 1
+  grep -q "$MARKER" "$LAUNCHER" || return 1
+  grep -Fxq "# runtime=${RUNTIME}" "$LAUNCHER"
+}
+
+if [[ -e $LAUNCHER || -L $LAUNCHER ]]; then
+  launcher_is_ours || fail "refusing to replace ${LAUNCHER}"
+fi
+
+unit_is_ours() {
+  [[ -f $UNIT ]] && grep -q "$MARKER" "$UNIT"
+}
+
+runtime_parent=$(dirname "$RUNTIME")
+mkdir -p "$runtime_parent"
+stage=$(mktemp -d "${runtime_parent}/.proton-drive-sync-stage.XXXXXX")
+cleanup_stage() {
+  if [[ -n ${stage:-} && -d $stage ]]; then
+    rm -rf "$stage"
+  fi
+}
+trap cleanup_stage EXIT
+
+cp -a "$PLUGIN_DIR/package.json" "$PLUGIN_DIR/package-lock.json" "$PLUGIN_DIR/tsconfig.json" "$stage/"
+cp -a "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/src" "$stage/"
+(
+  cd "$stage"
+  npm ci
+  npm run build
+  npm prune --omit=dev
+)
+printf '%s\n' "$PLUGIN_ID" >"$stage/.installed-by"
+
+trap - EXIT
+if [[ -d $RUNTIME ]]; then
+  rm -rf "$RUNTIME"
+fi
+mv "$stage" "$RUNTIME"
+stage=
+
+launcher_body=$(
+  cat <<EOF
+#!/usr/bin/env bash
+# ${MARKER}
+# runtime=${RUNTIME}
+exec node "${RUNTIME}/dist/cli/main.js" "\$@"
+EOF
+)
+mkdir -p "$(dirname "$LAUNCHER")"
+if [[ ! -f $LAUNCHER ]] || [[ $(cat "$LAUNCHER") != "$launcher_body" ]]; then
+  printf '%s\n' "$launcher_body" >"$LAUNCHER"
+  chmod +x "$LAUNCHER"
+fi
+
+if [[ -e $UNIT ]]; then
+  echo "install-engine: existing unit was left in place: $UNIT" >&2
+  if ((SERVICE)) && unit_is_ours; then
+    systemctl --user daemon-reload
+    systemctl --user enable --now proton-drive-sync.service
+  fi
+elif ((SERVICE)); then
+  mkdir -p "$UNIT_DIR"
+  cat >"$UNIT" <<EOF
+[Unit]
+Description=Proton Drive Sync
+After=graphical-session.target
+
+[Service]
+# ${MARKER}
+ExecStart=${LAUNCHER} run --no-tray
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+  systemctl --user daemon-reload
+  systemctl --user enable --now proton-drive-sync.service
+fi

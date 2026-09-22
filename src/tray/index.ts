@@ -1,8 +1,7 @@
 /**
- * Tray entry point: StatusNotifierItem over D-Bus, desktop notifications and
- * the local detail page. When no tray host is available, `startTray` rejects
- * and the engine keeps running headless (the CLI `status` command shows the
- * same information).
+ * Tray entry point: StatusNotifierItem over D-Bus and desktop notifications.
+ * The loopback details page is owned by `run`, including `--no-tray`. When no
+ * tray host is available, `startTray` rejects and the engine keeps running.
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -14,7 +13,6 @@ import type { ControlTarget } from '../engine/control.js';
 import type { SyncEngine } from '../engine/engine.js';
 import type { EngineStatus } from '../engine/status.js';
 import { createLogger, type LogSink } from '../remote/proton/logger.js';
-import { DetailPageServer } from './detailPage.js';
 import { buildTrayModel, dispatchMenuAction, type MenuAction, type TrayModel } from './menuModel.js';
 import { initialTracker, notificationsFor, type Notifier } from './notify.js';
 import { startStatusNotifierItem, type SniHandle } from './sni.js';
@@ -26,6 +24,8 @@ export interface TrayOptions {
   paths: AppPaths;
   audit: AuditLog;
   logSink: LogSink;
+  /** Loopback page started by `run`. The tray opens it and does not bind another. */
+  detailUrl: string;
   /** Test hooks. */
   openExternal?: (target: string) => void;
   busAddress?: string;
@@ -51,9 +51,7 @@ export async function startTray(options: TrayOptions): Promise<TrayHandle> {
   const logger = createLogger('tray', options.logSink);
   const open = options.openExternal ?? xdgOpen;
   const { controlTarget, engine } = options;
-
-  const page = new DetailPageServer(controlTarget);
-  await page.listen();
+  const detailUrl = options.detailUrl;
 
   const model = (): TrayModel => buildTrayModel(controlTarget.getStatus(), controlTarget.listConflicts(), controlTarget.listQuarantine());
 
@@ -66,7 +64,7 @@ export async function startTray(options: TrayOptions): Promise<TrayHandle> {
           open_folder: () => { open(options.config.localRoot); },
           open_recycle: () => { open(path.join(options.config.localRoot, INTERNAL_DIR_NAME, 'recycle')); },
           open_log: () => { open(options.paths.auditLogDir); },
-          open_details: () => { open(page.url); },
+          open_details: () => { open(detailUrl); },
           open_settings: () => { open(options.paths.configFile); },
         };
         opens[action.type]?.();
@@ -83,7 +81,6 @@ export async function startTray(options: TrayOptions): Promise<TrayHandle> {
       ...(options.sniTimeoutMs !== undefined ? { timeoutMs: options.sniTimeoutMs } : {}),
     });
   } catch (error) {
-    await page.close();
     throw new Error(`no tray host available: ${error instanceof Error ? error.message : String(error)}`);
   }
   const notifier: Notifier = sni.notifier;
@@ -99,14 +96,13 @@ export async function startTray(options: TrayOptions): Promise<TrayHandle> {
     }
   };
   engine.on('status', onStatus);
-  options.audit.append({ kind: 'engine', message: `tray started; details page at ${page.url}` });
+  options.audit.append({ kind: 'engine', message: `tray started; details page at ${detailUrl}` });
 
   return {
-    detailUrl: page.url,
+    detailUrl,
     dispose: async () => {
       engine.off('status', onStatus);
       await sni.dispose();
-      await page.close();
     },
   };
 }

@@ -10,15 +10,17 @@ import { saveConfigFile } from '../config/configFile.js';
 import { adoptedRootIdentity, readRootIdentity } from '../config/localRoot.js';
 import { ConfigError } from '../config/schema.js';
 import { runSetup } from '../config/setup.js';
-import { ControlClient, ControlServer } from '../engine/control.js';
+import { ControlClient, ControlServer, type ControlTarget } from '../engine/control.js';
 import { createEngine, NotConfiguredError } from '../engine/factory.js';
 import type { EngineStatus } from '../engine/status.js';
 import type { RemoteDrive } from '../remote/interface.js';
 import { LoginError } from '../remote/proton/auth.js';
+import { SESSION_SECRET_NAME } from '../remote/proton/sessionCredentials.js';
 import type { SessionState } from '../remote/proton/sessionState.js';
 import { RecycleBin } from '../safety/recycle.js';
+import { DetailPageServer } from '../tray/detailPage.js';
 import { formatStatus, formatTable } from './output.js';
-import type { CliContext } from './runtime.js';
+import { secretStoreFor, type CliContext } from './runtime.js';
 
 /** The part of the Proton runtime the commands need; the fake provides the same shape in tests. */
 export interface CommandRuntime {
@@ -41,7 +43,12 @@ export interface CommandDeps {
   stderr: (line: string) => void;
   openBrowser?: (url: string) => void;
   /** Tray starter; undefined means "no tray available". */
-  startTray?: (options: { engine: unknown; controlTarget: unknown }) => Promise<{ dispose(): Promise<void> }>;
+  startTray?: (options: { engine: unknown; controlTarget: unknown; detailUrl: string }) => Promise<{ dispose(): Promise<void> }>;
+  /**
+   * Whether a Proton session is stored. The default reads the secret store and
+   * returns a boolean; overrides exist so tests never touch a real keyring.
+   */
+  sessionPresent?: () => Promise<boolean>;
   /** Test hook: resolves when `run` may stop (instead of waiting for a signal). */
   runUntil?: Promise<void>;
   /** Test hook: engine timers. */
@@ -202,13 +209,33 @@ export async function run(deps: CommandDeps, flags: { dryRun: boolean; paused: b
   }
   const engine = bundle.engine;
   throttle = (s) => { engine.onThrottle(s); };
-  const control = new ControlServer(ctx.paths.controlSocket, bundle.controlTarget);
-  await control.listen();
+  const page = new DetailPageServer(bundle.controlTarget);
+  try {
+    await page.listen();
+  } catch (error) {
+    await page.close();
+    await bundle.dispose();
+    await runtime.dispose();
+    throw error;
+  }
+  const controlTarget: ControlTarget = {
+    ...bundle.controlTarget,
+    detailUrl: () => page.url,
+  };
+  const control = new ControlServer(ctx.paths.controlSocket, controlTarget);
+  try {
+    await control.listen();
+  } catch (error) {
+    await page.close();
+    await bundle.dispose();
+    await runtime.dispose();
+    throw error;
+  }
 
   let tray: { dispose(): Promise<void> } | null = null;
   if (flags.tray && deps.startTray !== undefined) {
     try {
-      tray = await deps.startTray({ engine: bundle.engine, controlTarget: bundle.controlTarget });
+      tray = await deps.startTray({ engine: bundle.engine, controlTarget, detailUrl: page.url });
     } catch (error) {
       ctx.audit.append({ kind: 'engine', message: `tray unavailable: ${error instanceof Error ? error.message : String(error)}; continuing headless` });
       if (!json) deps.stderr('Tray unavailable; running headless. Use `proton-drive-sync status`.');
@@ -225,6 +252,7 @@ export async function run(deps: CommandDeps, flags: { dryRun: boolean; paused: b
     stopping = true;
     if (!json) deps.stderr('Stopping...');
     await tray?.dispose();
+    await page.close();
     await control.close();
     await bundle.dispose();
     await runtime.dispose();
@@ -342,6 +370,108 @@ export function held(deps: CommandDeps, args: string[], json: boolean): Promise<
   );
 }
 
+export interface DoctorReport {
+  nodeOk: boolean;
+  configured: boolean;
+  loggedIn: boolean;
+  running: boolean;
+  localRoot: string | null;
+  remoteRoot: string | null;
+  detailUrl: string | null;
+}
+
+/** Copy only the doctor fields. Anything else, including a session, is dropped. */
+export function doctorReport(fields: DoctorReport): DoctorReport {
+  return {
+    nodeOk: fields.nodeOk,
+    configured: fields.configured,
+    loggedIn: fields.loggedIn,
+    running: fields.running,
+    localRoot: fields.localRoot,
+    remoteRoot: fields.remoteRoot,
+    detailUrl: fields.detailUrl,
+  };
+}
+
+export function loopbackDetailsUrl(url: unknown): string | null {
+  if (typeof url !== 'string' || url.length === 0) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1') return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+async function sessionIsStored(deps: CommandDeps): Promise<boolean> {
+  if (deps.sessionPresent !== undefined) return deps.sessionPresent();
+  try {
+    const value = await secretStoreFor(deps.ctx).get(SESSION_SECRET_NAME);
+    return value !== null && value.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function runningDetailUrl(deps: CommandDeps): Promise<string | null> {
+  if (!(await ControlClient.probe(deps.ctx.paths.controlSocket))) return null;
+  const client = new ControlClient(deps.ctx.paths.controlSocket);
+  try {
+    await client.connect(1000);
+    const result = await client.request<{ url?: unknown }>({ cmd: 'details' });
+    return loopbackDetailsUrl(result.url);
+  } catch {
+    return null;
+  } finally {
+    client.close();
+  }
+}
+
+export async function doctor(deps: CommandDeps, json: boolean): Promise<number> {
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  const config = deps.ctx.config;
+  const report = doctorReport({
+    nodeOk: Number.isFinite(nodeMajor) && nodeMajor >= 24,
+    configured: config !== null,
+    loggedIn: await sessionIsStored(deps),
+    running: await ControlClient.probe(deps.ctx.paths.controlSocket),
+    localRoot: config?.localRoot ?? null,
+    remoteRoot: config?.remoteRoot ?? null,
+    detailUrl: await runningDetailUrl(deps),
+  });
+  const human = [
+    `Node.js 24: ${report.nodeOk ? 'ok' : 'missing'}`,
+    `Configured: ${report.configured ? 'yes' : 'no'}`,
+    `Signed in: ${report.loggedIn ? 'yes' : 'no'}`,
+    `Running: ${report.running ? 'yes' : 'no'}`,
+    `Local folder: ${report.localRoot ?? '-'}`,
+    `Remote folder: ${report.remoteRoot ?? '-'}`,
+    `Details: ${report.detailUrl ?? '-'}`,
+  ];
+  out(deps, json, human, report);
+  return 0;
+}
+
+export function details(deps: CommandDeps, json: boolean): Promise<number> {
+  return viaSocket(
+    deps,
+    json,
+    async (client) => {
+      const result = await client.request<{ url?: unknown }>({ cmd: 'details' });
+      const url = loopbackDetailsUrl(result.url);
+      if (url === null) throw new Error('details page URL is not loopback');
+      return [url];
+    },
+    async (client) => {
+      const result = await client.request<{ url?: unknown }>({ cmd: 'details' });
+      const url = loopbackDetailsUrl(result.url);
+      if (url === null) throw new Error('details page URL is not loopback');
+      return { url };
+    },
+  );
+}
+
 export function showHistory(deps: CommandDeps, args: string[], json: boolean): number {
   const [target] = args;
   if (target === undefined) throw new CliError('usage: history <path|nodeUid>', 2);
@@ -383,8 +513,10 @@ Commands:
   logout                             Sign out and forget the stored session.
   setup <local-dir> <remote-folder>  Configure the sync pair, e.g. setup ~/ProtonDrive /my-files
   run [--dry-run] [--paused] [--no-tray]
-                                     Run the sync engine (foreground).
+                                     Run the sync engine (foreground). The details page is served either way.
+  doctor                             Report install, sign-in, and whether the engine is running.
   status                             Show engine status (works only while \`run\` is active).
+  details                            Print the loopback details page URL of the running engine.
   pause | resume | sync-now          Control the running engine.
   conflicts [resolve <id> <choice>]  List conflicts; choice: keep_local | keep_remote | keep_both
   quarantine [release <id>]          List quarantined items or release one.
@@ -425,6 +557,8 @@ export async function dispatch(deps: CommandDeps, args: ParsedArgs): Promise<num
       return setup(deps, rest, json);
     case 'run':
       return run(deps, { dryRun: args.dryRun, paused: args.paused, tray: args.tray }, json);
+    case 'doctor':
+      return doctor(deps, json);
     case 'status':
       return statusLike(deps, json, 'status');
     case 'pause':
@@ -433,6 +567,8 @@ export async function dispatch(deps: CommandDeps, args: ParsedArgs): Promise<num
       return statusLike(deps, json, 'resume');
     case 'sync-now':
       return statusLike(deps, json, 'sync_now');
+    case 'details':
+      return details(deps, json);
     case 'conflicts':
       return conflicts(deps, rest, json);
     case 'quarantine':

@@ -28,6 +28,7 @@ export type ControlCommand =
   | { cmd: 'quarantine' }
   | { cmd: 'release'; args: { id: number } }
   | { cmd: 'recycle' }
+  | { cmd: 'details' }
   | { cmd: 'quit' };
 
 export interface ControlTarget {
@@ -44,6 +45,8 @@ export interface ControlTarget {
   listRecycle(): RecycledItem[];
   quit(): Promise<void>;
   onStatus(listener: (status: EngineStatus) => void): () => void;
+  /** Loopback details page for this process, when `run` has bound one. */
+  detailUrl?: () => string | null;
 }
 
 interface Request {
@@ -157,6 +160,8 @@ export class ControlServer {
         return this.target.listQuarantine();
       case 'recycle':
         return this.target.listRecycle();
+      case 'details':
+        return { url: this.target.detailUrl?.() ?? null };
       case 'quit':
         setTimeout(() => void this.target.quit(), 10);
         return { quitting: true };

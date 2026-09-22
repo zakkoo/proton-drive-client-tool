@@ -150,6 +150,7 @@ describe('detail page and tray lifecycle', () => {
         paths: h.paths,
         audit: h.audit,
         logSink: () => undefined,
+        detailUrl: 'http://127.0.0.1:9/token/',
         busAddress: 'unix:path=/nonexistent/dbus-socket-for-tests',
         sniTimeoutMs: 1500,
       }),

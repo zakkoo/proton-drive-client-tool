@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.zakkoo.proton-drive",
+  "name": "Proton Drive Sync",
+  "version": "0.1.0",
+  "author": "zakko",
+  "license": "MIT",
+  "homepage": "https://github.com/zakkoo/proton-drive-client-tool",
+  "description": "Two-way sync between a folder on this machine and a folder in Proton Drive.",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {
+    "service": "omarchy/Service.qml",
+    "barWidget": "omarchy/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Proton Drive",
+    "description": "Two-way sync between a folder on this machine and a folder in Proton Drive.",
+    "category": "Files",
+    "aliases": ["proton", "drive", "sync"],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

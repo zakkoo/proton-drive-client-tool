@@ -47,10 +47,18 @@ async function main(argv: string[]): Promise<number> {
     prompt,
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`${line}\n`),
-    startTray: async ({ engine, controlTarget }) => {
+    startTray: async ({ engine, controlTarget, detailUrl }) => {
       const mod = await import('../tray/index.js');
       if (ctx.config === null) throw new Error('not configured');
-      return mod.startTray({ engine: engine as never, controlTarget: controlTarget as never, config: ctx.config, paths: ctx.paths, audit: ctx.audit, logSink: ctx.logSink });
+      return mod.startTray({
+        engine: engine as never,
+        controlTarget: controlTarget as never,
+        detailUrl,
+        config: ctx.config,
+        paths: ctx.paths,
+        audit: ctx.audit,
+        logSink: ctx.logSink,
+      });
     },
   };
   return dispatch(deps, args);

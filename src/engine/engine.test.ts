@@ -129,7 +129,7 @@ describe('SyncEngine', () => {
     rmSync(h.root, { recursive: true, force: true });
     h.fake.seedFile(h.remoteRootUid, 'poke.txt', 'poke'); // triggers a cycle via the feed
     const status = await h.waitFor(['error']);
-    expect(status.reason).toMatch(/sync root/);
+    expect(status.reason).toMatch(/sync root/i);
     expect(h.fake.trashedUids()).toEqual([]);
     expect(h.remoteFiles().get('keep.txt')).toBe('K');
   });

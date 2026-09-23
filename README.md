@@ -1,10 +1,12 @@
 # Proton Drive Sync
 
-Proton Drive Sync keeps one folder on this machine and one folder in Proton Drive the same. Create, edit, rename, or move a file on either side and the other side follows. A delete is not thrown away: here it goes to a recycle folder, and in Proton Drive it goes to Trash. A large delete or replace waits for you. If both sides change the same file, you keep both copies.
+![The Proton Drive Sync details page while a file uploads](proton-drive-1080p.gif)
 
-Sign-in and Drive access are based on Proton's official [Drive SDK](https://github.com/ProtonDriveApps/sdk). The account code in this repo is a Node port of that repository. The two-way sync around it is this project.
+Use Proton Drive Sync to keep a folder on your machine in sync with a folder in Proton Drive. When you create, edit, rename, or move a file on either side, the other side follows. If you delete a file, it is not erased: on your machine it goes to a recycle folder, and in Proton Drive it goes to Trash. A large delete or replace waits for you. If both sides change the same file, you keep both copies.
 
-Proton does not ship a sync client for Linux yet. This plugin is an unofficial stand-in for Omarchy until Proton releases its own. It is not affiliated with Proton AG or the Omarchy project.
+You sign in and reach Proton Drive through Proton's official [Drive SDK](https://github.com/ProtonDriveApps/sdk). The account code in this repository is a Node port of that SDK. The two-way sync on top of it is this project's own code.
+
+Proton does not ship a sync client for Linux yet. Until Proton releases its own, you can use this unofficial plugin on Omarchy. It is not affiliated with Proton AG or the Omarchy project.
 
 ## Install
 
@@ -12,9 +14,9 @@ Proton does not ship a sync client for Linux yet. This plugin is an unofficial s
 omarchy plugin add https://github.com/zakkoo/proton-drive-sync.git --enable
 ```
 
-The chip lands on the right of the built-in bar. It needs that bar. A replacement bar cannot see this plugin's service.
+You get a chip on the right of the built-in bar. You need that bar. A replacement bar cannot see this plugin's service.
 
-Then install the engine once. This builds it outside the plugin folder and puts `proton-drive-sync` on your PATH:
+Then install the engine once. This builds the engine outside the plugin folder and puts `proton-drive-sync` on your PATH:
 
 ```sh
 ~/.config/omarchy/plugins/io.github.zakkoo.proton-drive/scripts/install-engine
@@ -28,17 +30,17 @@ To start it with your graphical session:
 
 ## Sign in
 
-Click the chip. Choose Sign in. A terminal opens Proton's own page, and the password stays there. Then name the local folder and the remote folder, for example `/my-files`, and confirm. Nothing is written until you do.
+Click the chip. Choose Sign in. A terminal opens Proton's own page, and your password stays there. Then name your local folder and your remote folder, for example `/my-files`, and confirm. Nothing is written until you do.
 
 ## Day to day
 
 The chip tells you what the engine is doing. Open it to pause, resume, sync now, confirm or reject a held change, keep one side of a conflict, or release a file the engine refused to touch. Open folder and Open details show up while the engine is running.
 
-`proton-drive-sync doctor` reports whether you are installed, signed in, and running. `proton-drive-sync details` prints the loopback details page for that running engine.
+`proton-drive-sync doctor` reports whether you are installed, signed in, and running. `proton-drive-sync details` prints the loopback details page for the engine you are running.
 
 ## Reinstall and restart
 
-The chip and the engine update on their own. Update the plugin, build that folder into the engine, then restart the service so the running engine is the new build. Your sync folder, Proton session, and config stay.
+You update the chip and the engine separately. Update the plugin, build that folder into the engine, then restart the service so the engine you are running is the new build. Your sync folder, Proton session, and config stay.
 
 ```sh
 omarchy plugin update io.github.zakkoo.proton-drive
@@ -46,7 +48,7 @@ omarchy plugin update io.github.zakkoo.proton-drive
 systemctl --user restart proton-drive-sync.service
 ```
 
-`omarchy plugin update` fast-forwards the installed plugin to the latest published commit. A plugin folder you have edited yourself is left as it is. `install-engine` replaces the engine runtime. The restart command is the background service from `install-engine --service`. If you started `proton-drive-sync` in a terminal, quit that process and start it again.
+`omarchy plugin update` fast-forwards your installed plugin to the latest published commit. If you have edited that plugin folder yourself, it is left as it is. `install-engine` replaces the engine runtime. The restart command is the background service from `install-engine --service`. If you started `proton-drive-sync` in a terminal, quit that process and start it again.
 
 ## Remove
 
@@ -62,13 +64,13 @@ Then remove the shell plugin:
 omarchy plugin remove io.github.zakkoo.proton-drive
 ```
 
-`omarchy plugin remove` takes the chip off the bar. It does not delete your sync folder, your Proton session, or the tool's config. `remove-engine` takes the runtime, the launcher, and this plugin's user service. Your files stay either way.
+`omarchy plugin remove` takes the chip off your bar. It does not delete your sync folder, your Proton session, or the tool's config. `remove-engine` removes the runtime, the launcher, and this plugin's user service. Your files stay either way.
 
 ## What it needs
 
 - Omarchy with the built-in bar. The plugin runs unsandboxed, with your user privileges, inside the shell
 - Node.js 24 or newer
-- A Secret Service for the Proton session, which Omarchy already runs
+- A Secret Service for your Proton session, which Omarchy already runs
 - `@protontech/drive-sdk`, `@protontech/crypto`, and `@parcel/watcher`, fetched by the engine installer from this repo's lockfile
 - A Proton account
 

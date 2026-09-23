@@ -8,6 +8,8 @@ You sign in and reach Proton Drive through Proton's official [Drive SDK](https:/
 
 Proton does not ship a sync client for Linux yet. Until Proton releases its own, you can use this unofficial plugin on Omarchy. It is not affiliated with Proton AG or the Omarchy project.
 
+Have fun!
+
 ## Install
 
 ```sh

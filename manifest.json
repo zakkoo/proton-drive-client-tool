@@ -6,7 +6,7 @@
   "author": "zakko",
   "license": "MIT",
   "homepage": "https://github.com/zakkoo/proton-drive-client-tool",
-  "description": "Two-way sync between a folder on this machine and a folder in Proton Drive.",
+  "description": "Proton Drive, finally on your Omarchy bar. Pick a folder on your machine and one in Drive: create, edit, rename, or move on either side and the other side follows. Your password stays on Proton's sign-in page. Pause, resume, and keep both conflict copies from the chip. Deletes go to recycle or Trash, and a large change waits for you.",
   "kinds": ["service", "bar-widget"],
   "entryPoints": {
     "service": "omarchy/Service.qml",
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Proton Drive",
-    "description": "Two-way sync between a folder on this machine and a folder in Proton Drive.",
+    "description": "Proton Drive, finally on your Omarchy bar. Pick a folder on your machine and one in Drive: create, edit, rename, or move on either side and the other side follows. Your password stays on Proton's sign-in page. Pause, resume, and keep both conflict copies from the chip. Deletes go to recycle or Trash, and a large change waits for you.",
     "category": "Files",
     "aliases": ["proton", "drive", "sync"],
     "allowMultiple": false,

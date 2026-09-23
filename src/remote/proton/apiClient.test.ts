@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SecretRegistry } from '../../audit/redact.js';
@@ -7,7 +8,7 @@ import { UnsafeFileSecretStore } from '../../config/secretStore.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ApiError, ProtonApiClient, SdkHttpClient } from './apiClient.js';
+import { ApiError, MAX_JSON_RESPONSE_BYTES, ProtonApiClient, ResponseBodyTooLargeError, SdkHttpClient } from './apiClient.js';
 import { createLogger, silentSink } from './logger.js';
 import { Credentials } from './sessionCredentials.js';
 
@@ -63,6 +64,31 @@ function client(extra: Partial<ConstructorParameters<typeof ProtonApiClient>[0]>
 function json(res: ServerResponse, status: number, data: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { 'content-type': 'application/json', ...headers });
   res.end(JSON.stringify(data));
+}
+
+/** Write without Content-Length so the body ceiling is enforced by counting chunks. */
+function chunked(res: ServerResponse, status: number, body: string, headers: Record<string, string> = {}) {
+  res.writeHead(status, { 'content-type': 'application/json', ...headers });
+  const mid = Math.min(body.length, Math.max(1, Math.floor(body.length / 2)));
+  res.write(body.slice(0, mid));
+  res.write(body.slice(mid));
+  res.end();
+}
+
+function jsonBytes(byteLength: number): string {
+  const prefix = '{"k":"';
+  const suffix = '"}';
+  const pad = byteLength - prefix.length - suffix.length;
+  if (pad < 0) throw new Error(`jsonBytes needs at least ${String(prefix.length + suffix.length)} bytes`);
+  return `${prefix}${'a'.repeat(pad)}${suffix}`;
+}
+
+const MARKER = 'PAST_CAP';
+
+function sizeError(error: unknown): boolean {
+  if (!(error instanceof ResponseBodyTooLargeError)) return false;
+  const text = `${error.name} ${error.message} ${JSON.stringify(error)}`;
+  return !text.includes(MARKER);
 }
 
 describe('ProtonApiClient', () => {
@@ -196,6 +222,82 @@ describe('ProtonApiClient', () => {
     const p = client().request('/slow', { signal: ac.signal });
     ac.abort(new Error('user cancelled'));
     await expect(p).rejects.toThrow('user cancelled');
+  });
+
+  it('uses a 16 MiB JSON ceiling by default', () => {
+    expect(MAX_JSON_RESPONSE_BYTES).toBe(16 * 1024 * 1024);
+  });
+
+  it('parses a JSON body of exactly the ceiling and rejects one byte past it', async () => {
+    const ceiling = 48;
+    const exact = jsonBytes(ceiling);
+    handler = (_req, res) => { chunked(res, 200, exact); };
+    const data = await client({ maxJsonBodyBytes: ceiling }).requestJson<{ k: string }>('/exact');
+    expect(data.k).toBe('a'.repeat(ceiling - '{"k":""}'.length));
+
+    const over = `${exact}${MARKER}`;
+    handler = (_req, res) => { chunked(res, 200, over); };
+    await expect(client({ maxJsonBodyBytes: ceiling }).requestJson('/over')).rejects.toSatisfy(sizeError);
+  });
+
+  it('rejects a JSON body whose Content-Length is above the ceiling before the body arrives', async () => {
+    handler = (_req, res) => {
+      res.on('error', () => undefined);
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': '1000000' });
+      res.write(`{"k":"${MARKER}`);
+    };
+    await expect(client({ maxJsonBodyBytes: 32 }).requestJson('/sized', { timeoutMs: 1_000 })).rejects.toSatisfy(sizeError);
+  });
+
+  it('leaves the session unchanged when the refresh body exceeds the ceiling', async () => {
+    const ceiling = 48;
+    handler = (req, res) => {
+      if (req.url === '/auth/v4/refresh') {
+        chunked(res, 200, `${'x'.repeat(ceiling)}${MARKER}`);
+        return;
+      }
+      json(res, 401, { Code: 401, Error: 'Invalid access token' });
+    };
+    const c = client({ maxJsonBodyBytes: ceiling });
+    await expect(c.requestJson('/drive/v2/volumes')).rejects.toSatisfy((error: unknown) => error instanceof ApiError && error.status === 401);
+    expect(creds.accessToken).toBe('access-old');
+    expect(creds.refreshToken).toBe('refresh-1');
+    expect(creds.isLoggedIn()).toBe(true);
+  });
+
+  it('caps SDK JSON bodies and storage error bodies, and still returns a full file download', async () => {
+    const ceiling = 48;
+    const markerBody = `${jsonBytes(ceiling)}${MARKER}`;
+    const sdk = new SdkHttpClient(client({ maxJsonBodyBytes: ceiling }));
+    const call = { url: `${baseUrl}/drive/x`, method: 'GET', headers: new Headers(), timeoutMs: 5_000 };
+
+    handler = (_req, res) => { chunked(res, 200, markerBody); };
+    const jsonResponse = await sdk.fetchJson(call);
+    await expect(jsonResponse.json()).rejects.toSatisfy(sizeError);
+
+    const file = Buffer.alloc(ceiling + MARKER.length, 7);
+    handler = (_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      res.end(file);
+    };
+    const blob = await sdk.fetchBlob(call);
+    const downloaded = new Uint8Array(await blob.arrayBuffer());
+    expect(downloaded.byteLength).toBe(file.length);
+    expect(downloaded[0]).toBe(7);
+    expect(downloaded[downloaded.length - 1]).toBe(7);
+
+    handler = (_req, res) => { chunked(res, 422, markerBody); };
+    const errorBlob = await sdk.fetchBlob(call);
+    await expect(errorBlob.json()).rejects.toSatisfy(sizeError);
+
+    handler = (_req, res) => {
+      const payload = gzipSync(Buffer.from(jsonBytes(ceiling)));
+      res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': 'gzip' });
+      res.end(payload);
+    };
+    const gzipResponse = await sdk.fetchJson(call);
+    expect(gzipResponse.headers.get('content-encoding')).toBeNull();
+    await expect(gzipResponse.json()).resolves.toEqual({ k: 'a'.repeat(ceiling - '{"k":""}'.length) });
   });
 
   it('exposes the SDK HTTP client interface', async () => {

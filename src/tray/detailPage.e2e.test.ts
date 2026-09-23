@@ -55,17 +55,18 @@ describe('detail page after a sync', () => {
     const data = JSON.parse(res.body) as DetailData;
 
     document.body.innerHTML = `
-      <span id="state"></span><span id="reason"></span>
-      <p id="lines"></p><div id="proton-documents"></div><div id="held"></div>
-      <table id="transfers"></table><table id="conflicts"></table>
-      <table id="quarantine"></table><table id="recycle"></table>`;
+      <span id="state"></span><span id="reason"></span><span id="glance"></span>
+      <div id="lines"></div><div id="proton-documents"></div><div id="held"></div>
+      <div id="transfers"></div><div id="conflicts"></div>
+      <div id="quarantine"></div><div id="recycle"></div>`;
     applySnapshot(document, data);
 
     expect(document.getElementById('state')?.textContent).toBe('idle');
     expect(document.getElementById('lines')?.textContent).toContain('Last sync:');
     expect(document.getElementById('lines')?.textContent).toContain('Files: 2 on this computer, 2 on Proton, 2 in sync');
     expect(document.getElementById('lines')?.textContent).not.toContain('synced');
-    expect(document.getElementById('proton-documents')?.textContent).toBe('');
+    expect(document.getElementById('proton-documents')?.textContent).toContain('none');
+    expect(document.getElementById('proton-documents')?.textContent).not.toContain('one.txt');
   });
 
   it('serves the page behind the run token and 404s an unknown token', async () => {
@@ -76,10 +77,23 @@ describe('detail page after a sync', () => {
 
     const ok = await httpGet(server.url);
     expect(ok.status).toBe(200);
-    // The served page carries the tested renderer and the library section.
+    // The served page carries the tested renderer, the card colors, and the library section.
     expect(ok.body).toContain('id="lines"');
     expect(ok.body).toContain('id="proton-documents"');
+    expect(ok.body).toContain('id="glance"');
+    expect(ok.body).toContain('id="action-error"');
     expect(ok.body).toContain('function applySnapshot');
+    expect(ok.body).toContain('border-radius');
+    for (const color of ['#cdfae4', '#d0d8fc', '#fcfdfe', '#2c3343', '#2cd1ec', '#42aefc']) expect(ok.body).toContain(color);
+    expect(ok.body).not.toMatch(/<link[^>]+stylesheet/i);
+    expect(ok.body).not.toMatch(/<script[^>]+src=/i);
+    const order = ['id="held"', 'id="conflicts"', 'id="quarantine"', 'id="transfers"', 'id="lines"', 'id="proton-documents"', 'id="recycle"'];
+    let at = -1;
+    for (const id of order) {
+      const next = ok.body.indexOf(id);
+      expect(next).toBeGreaterThan(at);
+      at = next;
+    }
 
     const bad = await httpGet(server.url.replace(server.token, 'deadbeef'));
     expect(bad.status).toBe(404);

@@ -26,6 +26,7 @@ import {
   type UploadMetadata,
 } from '@protontech/drive-sdk';
 
+import { ResponseBodyTooLargeError } from './proton/apiClient.js';
 import type { Logger } from './proton/logger.js';
 import {
   RemoteError,
@@ -116,9 +117,16 @@ export function toRemoteEvent(event: DriveEvent): RemoteEvent {
   }
 }
 
+function isResponseBodyTooLarge(error: unknown): error is Error {
+  return error instanceof ResponseBodyTooLargeError || (error instanceof Error && error.cause instanceof ResponseBodyTooLargeError);
+}
+
 /** Map an SDK error to RemoteError. Anything unknown is treated as non-retryable. */
 export function toRemoteError(error: unknown, context: string): RemoteError {
   if (error instanceof RemoteError) return error;
+  if (isResponseBodyTooLarge(error)) {
+    return new RemoteError(`${context}: response exceeded the size limit`, 'connection', true, { cause: error });
+  }
   const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
   if (error instanceof NodeWithSameNameExistsValidationError) {
     return new RemoteError(`${context}: a node with the same name already exists`, 'name_conflict', false, {

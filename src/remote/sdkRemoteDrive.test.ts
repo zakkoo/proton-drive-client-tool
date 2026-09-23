@@ -14,6 +14,7 @@ import {
   type NodeResult,
 } from '@protontech/drive-sdk';
 
+import { ResponseBodyTooLargeError } from './proton/apiClient.js';
 import { createLogger, silentSink } from './proton/logger.js';
 import { RemoteError } from './interface.js';
 import { SdkRemoteDrive, toRemoteError, toRemoteEvent, toRemoteNode, type SdkClient } from './sdkRemoteDrive.js';
@@ -158,6 +159,24 @@ describe('toRemoteError', () => {
     }
     const conflict = toRemoteError(new NodeWithSameNameExistsValidationError('exists', 2500, 'other-uid'), 'x');
     expect(conflict.details).toMatchObject({ existingNodeUid: 'other-uid' });
+  });
+
+  it('maps an oversized response, including one hidden on an SDK error cause, without keeping the body', () => {
+    const secret = 'BODYSECRET';
+    const direct = toRemoteError(new ResponseBodyTooLargeError(), 'ctx');
+    expect(direct.kind).toBe('connection');
+    expect(direct.retryable).toBe(true);
+    expect(direct.message).toBe('ctx: response exceeded the size limit');
+    expect(direct.message).not.toContain(secret);
+    expect(direct.details).toBeUndefined();
+
+    const wrapped = Object.assign(new ServerError(`OK ${secret}`), { statusCode: 401, cause: new ResponseBodyTooLargeError() });
+    const viaCause = toRemoteError(wrapped, 'ctx');
+    expect(viaCause.kind).toBe('connection');
+    expect(viaCause.retryable).toBe(true);
+    expect(viaCause.message).toBe('ctx: response exceeded the size limit');
+    expect(viaCause.message).not.toContain(secret);
+    expect(viaCause.details).toBeUndefined();
   });
 });
 

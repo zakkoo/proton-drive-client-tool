@@ -17,10 +17,20 @@ import type { Logger } from './logger.js';
 import type { SessionCredentials } from './sessionCredentials.js';
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
+/** Largest Proton JSON body this client will materialise. File bytes are not subject to it. */
+export const MAX_JSON_RESPONSE_BYTES = 16 * 1024 * 1024;
 const MAX_RETRY_AFTER_MS = 120_000;
 const DEFAULT_MAX_ATTEMPTS = 4;
 const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
 const TRANSIENT_STATUSES = new Set([408, 500, 502, 503, 504]);
+
+/** A Proton JSON or error body exceeded the fixed ceiling. The message never includes response bytes. */
+export class ResponseBodyTooLargeError extends Error {
+  constructor() {
+    super('Response exceeded the size limit');
+    this.name = 'ResponseBodyTooLargeError';
+  }
+}
 
 export type ThrottleListener = (state: 'throttled' | 'unthrottled', waitMs?: number) => void;
 
@@ -37,6 +47,11 @@ export interface ApiClientOptions {
   /** Injectable random for jitter. */
   random?: () => number;
   maxAttempts?: number;
+  /**
+   * Test override for the JSON body ceiling. Production uses {@link MAX_JSON_RESPONSE_BYTES}.
+   * Not a user setting.
+   */
+  maxJsonBodyBytes?: number;
   onThrottle?: ThrottleListener;
   /** Called with every response, e.g. to inspect drive requirement headers. */
   onResponse?: (response: Response) => void;
@@ -115,12 +130,68 @@ function isNetworkError(error: unknown): boolean {
   return error.name === 'TypeError' || 'code' in error;
 }
 
+async function cancelBody(response: Response): Promise<void> {
+  const body = response.body;
+  if (body === null) return;
+  await body.cancel().catch(() => undefined);
+}
+
+function declaredContentLength(headers: Headers): number | undefined {
+  const raw = headers.get('content-length');
+  if (raw === null || !/^\d+$/.test(raw)) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+/**
+ * Replace the body with a stream that errors once the next byte would pass
+ * `maxBytes`. `Content-Length` above the ceiling fails before any read.
+ * `content-encoding` and `content-length` are dropped so a rebuilt response
+ * is not decoded twice and does not advertise the old length.
+ */
+async function limitResponseBody(response: Response, maxBytes: number): Promise<Response> {
+  const declared = declaredContentLength(response.headers);
+  if (declared !== undefined && declared > maxBytes) {
+    await cancelBody(response);
+    throw new ResponseBodyTooLargeError();
+  }
+  const source = response.body;
+  if (source === null) return response;
+
+  const reader = source.getReader();
+  let total = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      if (value.byteLength > maxBytes - total) {
+        await reader.cancel().catch(() => undefined);
+        throw new ResponseBodyTooLargeError();
+      }
+      total += value.byteLength;
+      controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+
+  const headers = new Headers(response.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  return new Response(stream, { status: response.status, statusText: response.statusText, headers });
+}
+
 export class ProtonApiClient {
   readonly baseUrlWithProtocol: string;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   private readonly random: () => number;
   private readonly maxAttempts: number;
+  private readonly maxJsonBodyBytes: number;
   private activeRefresh: Promise<boolean> | null = null;
   private throttledUntil = 0;
 
@@ -130,6 +201,14 @@ export class ProtonApiClient {
     this.sleep = options.sleep ?? defaultSleep;
     this.random = options.random ?? Math.random;
     this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    const ceiling = options.maxJsonBodyBytes ?? MAX_JSON_RESPONSE_BYTES;
+    if (!Number.isSafeInteger(ceiling) || ceiling < 0) throw new Error('maxJsonBodyBytes must be a non-negative safe integer');
+    this.maxJsonBodyBytes = ceiling;
+  }
+
+  /** Bound a JSON or error body. Successful file-content responses stay uncapped. */
+  capJsonBody(response: Response): Promise<Response> {
+    return limitResponseBody(response, this.maxJsonBodyBytes);
   }
 
   url(pathname: string, searchParams?: Record<string, string | number>): string {
@@ -225,7 +304,7 @@ export class ProtonApiClient {
 
   /** Request and parse JSON; throws ApiError on any non-2xx status. */
   async requestJson<T>(pathnameOrUrl: string, req: ApiRequest = {}): Promise<T> {
-    const response = await this.request(pathnameOrUrl, req);
+    const response = await this.capJsonBody(await this.request(pathnameOrUrl, req));
     const text = await response.text();
     let parsed: unknown = undefined;
     if (text !== '') {
@@ -277,14 +356,28 @@ export class ProtonApiClient {
       json: { ResponseType: 'token', GrantType: 'refresh_token', RefreshToken: refreshToken, RedirectURI: 'https://protonmail.ch' },
     });
     if (!response.ok) {
-      this.options.logger.error(`Failed to refresh session: HTTP ${response.status}`);
-      if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-        // The session is gone for good; forget it so the engine enters "needs login".
-        await this.options.credentials.signOut();
+      try {
+        this.options.logger.error(`Failed to refresh session: HTTP ${response.status}`);
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          // The session is gone for good; forget it so the engine enters "needs login".
+          await this.options.credentials.signOut();
+        }
+        return false;
+      } finally {
+        await cancelBody(response);
       }
-      return false;
     }
-    const data = (await response.json()) as { UID?: string; AccessToken?: string; RefreshToken?: string };
+    let data: { UID?: string; AccessToken?: string; RefreshToken?: string };
+    try {
+      const limited = await this.capJsonBody(response);
+      data = (await limited.json()) as { UID?: string; AccessToken?: string; RefreshToken?: string };
+    } catch (error) {
+      if (error instanceof ResponseBodyTooLargeError) {
+        this.options.logger.error('Failed to refresh session: response exceeded the size limit');
+        return false;
+      }
+      throw error;
+    }
     if (typeof data.AccessToken !== 'string') {
       this.options.logger.error('Failed to refresh session: missing AccessToken');
       return false;
@@ -302,8 +395,8 @@ export class ProtonApiClient {
 export class SdkHttpClient implements ProtonDriveHTTPClient {
   constructor(private readonly api: ProtonApiClient) {}
 
-  fetchJson(options: ProtonDriveHTTPClientJsonRequest): Promise<Response> {
-    return this.api.request(options.url, {
+  async fetchJson(options: ProtonDriveHTTPClientJsonRequest): Promise<Response> {
+    const response = await this.api.request(options.url, {
       method: options.method,
       headers: options.headers,
       ...(options.json !== undefined ? { json: options.json } : {}),
@@ -311,15 +404,19 @@ export class SdkHttpClient implements ProtonDriveHTTPClient {
       timeoutMs: options.timeoutMs,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     });
+    return this.api.capJsonBody(response);
   }
 
-  fetchBlob(options: ProtonDriveHTTPClientBlobRequest): Promise<Response> {
-    return this.api.request(options.url, {
+  async fetchBlob(options: ProtonDriveHTTPClientBlobRequest): Promise<Response> {
+    const response = await this.api.request(options.url, {
       method: options.method,
       headers: options.headers,
       ...(options.body !== undefined ? { body: options.body } : {}),
       timeoutMs: options.timeoutMs,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     });
+    // Successful file bytes stay streamed. Error bodies are JSON and use the same ceiling.
+    if (response.status < 400) return response;
+    return this.api.capJsonBody(response);
   }
 }
